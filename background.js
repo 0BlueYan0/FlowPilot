@@ -1,4 +1,4 @@
-// background.js — Service Worker: orchestration, state, tab management, message routing
+﻿// background.js — Service Worker: orchestration, state, tab management, message routing
 
 importScripts(
   'shared/flow-registry.js',
@@ -12397,6 +12397,10 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   };
   const initialFlowState = await getState();
   const activeFlowId = String(initialFlowState?.activeFlowId || initialFlowState?.flowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
+  const activeFlowLabel = String(
+    self.MultiPageFlowRegistry?.getFlowLabel?.(activeFlowId)
+    || activeFlowId
+  ).trim() || activeFlowId;
 
   if (activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
     await broadcastAutoRunStatus('running', {
@@ -12409,7 +12413,7 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       if (continueCurrentAttempt) {
         await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续当前进度，从节点 ${currentStartNodeId} 开始（第 ${attemptRuns} 次尝试）===`, 'info');
       } else {
-        await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：第 ${attemptRuns} 次尝试，开始执行 ${activeFlowId} flow ===`, 'info');
+        await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：第 ${attemptRuns} 次尝试，开始执行 ${activeFlowLabel} 流程 ===`, 'info');
       }
 
       let latestState = await getState();

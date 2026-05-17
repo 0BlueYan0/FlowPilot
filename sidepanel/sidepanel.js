@@ -2373,6 +2373,36 @@ function normalizeStepExecutionRangeEntry(value = {}) {
   };
 }
 
+function getKiroUploadStatusLabel(value = '') {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) {
+    return '未开始';
+  }
+
+  const normalizedValue = rawValue.toLowerCase();
+  switch (normalizedValue) {
+    case 'waiting_login':
+      return '等待登录授权';
+    case 'ready_to_upload':
+      return '等待上传';
+    case 'uploading':
+      return '上传中';
+    case 'uploaded':
+    case 'credential uploaded.':
+      return '上传成功';
+    case 'error':
+      return '上传失败';
+    case 'waiting_user':
+      return '等待用户确认';
+    case 'authorized':
+      return '已授权';
+    case 'expired':
+      return '已过期';
+    default:
+      return rawValue;
+  }
+}
+
 function normalizeStepExecutionRangeByFlow(value = {}) {
   const source = isPlainObjectValue(value) ? value : {};
   const next = {};
@@ -9954,7 +9984,7 @@ function applySettingsState(state) {
       || state?.kiroUploadStatus
       || ''
     ).trim();
-    displayKiroUploadStatus.textContent = kiroUploadStatus || '未开始';
+    displayKiroUploadStatus.textContent = getKiroUploadStatusLabel(kiroUploadStatus);
   }
   const normalizedIpProxyService = resolveIpProxyService(state?.ipProxyService);
   const normalizedIpProxyServiceProfiles = typeof normalizeIpProxyServiceProfiles === 'function'

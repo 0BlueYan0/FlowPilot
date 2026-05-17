@@ -175,6 +175,9 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(kiroSteps.every((step) => step.flowId === 'kiro'), true);
   assert.equal(kiroSteps[0].driverId, 'background/kiro-device-auth');
   assert.equal(kiroSteps[2].sourceId, 'kiro-rs-admin');
+  assert.equal(kiroSteps[0].title, '启动设备登录');
+  assert.equal(kiroSteps[1].title, '等待设备登录确认');
+  assert.equal(kiroSteps[2].title, '上传凭据到 kiro.rs');
   assert.deepStrictEqual(api.getStepIds({ activeFlowId: 'kiro' }), [1, 2, 3]);
   assert.equal(api.getLastStepId({ activeFlowId: 'kiro' }), 3);
   assert.deepStrictEqual(

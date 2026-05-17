@@ -312,15 +312,15 @@ test('kiro upload credential checks connection and uploads builder id credential
   });
 
   const finalState = mergeUpdates(stateUpdates);
-  assert.equal(finalState.kiroLastConnectionMessage, 'kiro.rs connection ok (HTTP 200)');
+  assert.equal(finalState.kiroLastConnectionMessage, 'kiro.rs 连接正常（HTTP 200）');
   assert.equal(finalState.kiroAuthorizedEmail, 'aws-user@example.com');
   assert.equal(finalState.kiroCredentialId, 321);
-  assert.equal(finalState.kiroUploadStatus, 'uploaded');
+  assert.equal(finalState.kiroUploadStatus, '上传成功');
   assert.equal(typeof finalState.kiroLastUploadAt, 'number');
   assert.equal(finalState.kiroLastUploadAt > 0, true);
 
   assert.equal(completeCalls.length, 1);
   assert.equal(completeCalls[0].nodeId, 'kiro-upload-credential');
   assert.equal(completeCalls[0].payload.kiroCredentialId, 321);
-  assert.equal(completeCalls[0].payload.kiroUploadStatus, 'uploaded');
+  assert.equal(completeCalls[0].payload.kiroUploadStatus, '上传成功');
 });

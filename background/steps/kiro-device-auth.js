@@ -26,7 +26,7 @@
   function normalizeKiroRsBaseUrl(value = '') {
     const normalized = cleanString(value).replace(/\/+$/, '');
     if (!normalized) {
-      throw new Error('Missing kiro.rs admin URL.');
+      throw new Error('缺少 kiro.rs 管理后台地址。');
     }
     return normalized.endsWith('/admin')
       ? normalized.slice(0, -'/admin'.length)
@@ -45,7 +45,20 @@
   }
 
   function getErrorMessage(error) {
-    return error instanceof Error ? error.message : String(error ?? 'Unknown error');
+    return error instanceof Error ? error.message : String(error ?? '未知错误');
+  }
+
+  function normalizeKiroUploadMessage(value = '') {
+    const rawValue = cleanString(value);
+    if (!rawValue) {
+      return '上传成功';
+    }
+
+    const normalizedValue = rawValue.toLowerCase();
+    if (normalizedValue === 'uploaded' || normalizedValue === 'credential uploaded.') {
+      return '上传成功';
+    }
+    return rawValue;
   }
 
   function normalizePositiveInteger(value, fallback) {
@@ -121,13 +134,13 @@
     });
     const registerBody = await readResponse(registerResponse);
     if (!registerResponse.ok) {
-      throw new Error(`Builder ID client registration failed: ${cleanString(registerBody.text || registerResponse.statusText) || registerResponse.status}`);
+      throw new Error(`Builder ID 客户端注册失败：${cleanString(registerBody.text || registerResponse.statusText) || registerResponse.status}`);
     }
 
     const clientId = cleanString(registerBody.json?.clientId);
     const clientSecret = String(registerBody.json?.clientSecret || '');
     if (!clientId || !clientSecret) {
-      throw new Error('Builder ID client registration response is missing client credentials.');
+      throw new Error('Builder ID 客户端注册响应缺少凭据。');
     }
 
     const authorizationResponse = await fetchImpl(`${oidcBaseUrl}/device_authorization`, {
@@ -143,7 +156,7 @@
     });
     const authorizationBody = await readResponse(authorizationResponse);
     if (!authorizationResponse.ok) {
-      throw new Error(`Builder ID device authorization failed: ${cleanString(authorizationBody.text || authorizationResponse.statusText) || authorizationResponse.status}`);
+      throw new Error(`Builder ID 设备授权失败：${cleanString(authorizationBody.text || authorizationResponse.statusText) || authorizationResponse.status}`);
     }
 
     const deviceCode = String(authorizationBody.json?.deviceCode || '');
@@ -155,7 +168,7 @@
     const interval = normalizePositiveInteger(authorizationBody.json?.interval, 5);
     const expiresIn = normalizePositiveInteger(authorizationBody.json?.expiresIn, 600);
     if (!deviceCode || !userCode || !verificationUriComplete) {
-      throw new Error('Builder ID device authorization response is missing required fields.');
+      throw new Error('Builder ID 设备授权响应缺少必要字段。');
     }
 
     return {
@@ -205,14 +218,14 @@
         return { completed: false, status: 'slow_down' };
       }
       if (errorCode === 'expired_token') {
-        throw new Error('Kiro device login expired.');
+        throw new Error('Kiro 设备登录已过期。');
       }
       if (errorCode === 'access_denied') {
-        throw new Error('User denied the Builder ID device login request.');
+        throw new Error('用户拒绝了 Builder ID 设备登录授权请求。');
       }
-      throw new Error(`Builder ID authorization failed: ${errorCode || cleanString(body.text || response.statusText) || response.status}`);
+      throw new Error(`Builder ID 授权失败：${errorCode || cleanString(body.text || response.statusText) || response.status}`);
     }
-    throw new Error(`Builder ID token request failed: HTTP ${response.status}`);
+    throw new Error(`Builder ID 令牌请求失败：HTTP ${response.status}`);
   }
 
   async function checkKiroRsConnection(baseUrl, apiKey, fetchImpl) {
@@ -228,31 +241,31 @@
     if (response.ok) {
       return {
         ok: true,
-        message: `kiro.rs connection ok (HTTP ${response.status})`,
+        message: `kiro.rs 连接正常（HTTP ${response.status}）`,
       };
     }
     if (response.status === 405) {
       return {
         ok: true,
-        message: 'kiro.rs upload endpoint is reachable.',
+        message: 'kiro.rs 上传接口可访问。',
       };
     }
     if (response.status === 401 || response.status === 403) {
       return {
         ok: false,
-        message: `kiro.rs API key rejected (HTTP ${response.status})`,
+        message: `kiro.rs API Key 被拒绝（HTTP ${response.status}）`,
       };
     }
     if (response.status === 404) {
       return {
         ok: false,
-        message: 'kiro.rs admin endpoint not found.',
+        message: '未找到 kiro.rs 管理接口。',
       };
     }
     return {
       ok: false,
       message: cleanString(body.json?.error?.message || body.json?.message || body.text || response.statusText)
-        || `kiro.rs connection failed (HTTP ${response.status})`,
+        || `kiro.rs 连接失败（HTTP ${response.status}）`,
     };
   }
 
@@ -271,13 +284,13 @@
     if (!response.ok) {
       const message = cleanString(body.json?.error?.message || body.json?.message || body.text || response.statusText)
         || `HTTP ${response.status}`;
-      throw new Error(`kiro.rs credential upload failed: ${message}`);
+      throw new Error(`kiro.rs 凭据上传失败：${message}`);
     }
 
     return {
       credentialId: Number(body.json?.credentialId || body.json?.credential_id || 0) || null,
       email: cleanString(body.json?.email),
-      message: cleanString(body.json?.message) || 'Credential uploaded.',
+      message: normalizeKiroUploadMessage(body.json?.message),
       raw: body.json,
     };
   }
@@ -360,7 +373,7 @@
         };
 
         await setState(updates);
-        await log(`Kiro device login started. Open ${loginUrl} and approve with code ${auth.userCode}.`, 'info', nodeId);
+        await log(`Kiro 设备登录已启动。请打开 ${loginUrl}，并输入授权码 ${auth.userCode} 完成确认。`, 'info', nodeId);
         await completeNodeFromBackground(nodeId, updates);
       } catch (error) {
         const message = getErrorMessage(error);
@@ -382,10 +395,10 @@
         const region = normalizeRegion(latestState.kiroAuthRegion, DEFAULT_REGION);
         const expiresAt = Math.max(0, Number(latestState.kiroAuthExpiresAt) || 0);
         if (!clientId || !clientSecret || !deviceCode) {
-          throw new Error('Kiro device login has not been started yet.');
+          throw new Error('尚未启动 Kiro 设备登录，请先执行步骤 1。');
         }
         if (!expiresAt || expiresAt <= Date.now()) {
-          throw new Error('Kiro device login expired. Restart step 1.');
+          throw new Error('Kiro 设备登录已过期，请重新执行步骤 1。');
         }
 
         await setState({
@@ -393,7 +406,7 @@
           kiroAuthStatus: 'waiting_user',
           kiroUploadStatus: 'waiting_login',
         });
-        await log('Waiting for Kiro device login approval...', 'info', nodeId);
+        await log('正在等待 Kiro 设备登录授权确认...', 'info', nodeId);
 
         let intervalSeconds = normalizePositiveInteger(latestState.kiroAuthIntervalSeconds, 5);
         while (Date.now() < expiresAt) {
@@ -414,7 +427,7 @@
               kiroUploadStatus: 'ready_to_upload',
             };
             await setState(updates);
-            await log('Kiro device login approved. Refresh token captured.', 'ok', nodeId);
+            await log('Kiro 设备登录已确认，已获取 Refresh Token。', 'ok', nodeId);
             await completeNodeFromBackground(nodeId, updates);
             return;
           }
@@ -425,12 +438,12 @@
           await sleepWithStop(intervalSeconds * 1000);
         }
 
-        throw new Error('Kiro device login expired. Restart step 1.');
+        throw new Error('Kiro 设备登录已过期，请重新执行步骤 1。');
       } catch (error) {
         const message = getErrorMessage(error);
         await persistFailure({
           kiroAuthError: message,
-          kiroAuthStatus: /expired/i.test(message) ? 'expired' : 'error',
+          kiroAuthStatus: /(expired|已过期)/i.test(message) ? 'expired' : 'error',
         });
         throw error;
       }
@@ -447,20 +460,20 @@
         const kiroRsUrl = String(latestState.kiroRsUrl || '');
         const kiroRsKey = String(latestState.kiroRsKey || '');
         if (!refreshToken || !clientId || !clientSecret) {
-          throw new Error('Kiro refresh token is missing. Complete step 2 first.');
+          throw new Error('缺少 Kiro Refresh Token，请先完成步骤 2。');
         }
         if (!cleanString(kiroRsUrl)) {
-          throw new Error('Missing kiro.rs admin URL.');
+          throw new Error('缺少 kiro.rs 管理后台地址。');
         }
         if (!cleanString(kiroRsKey)) {
-          throw new Error('Missing kiro.rs API key.');
+          throw new Error('缺少 kiro.rs API Key。');
         }
 
         await setState({
           kiroUploadError: '',
           kiroUploadStatus: 'uploading',
         });
-        await log('Uploading Builder ID credential to kiro.rs...', 'info', nodeId);
+        await log('正在上传 Builder ID 凭据到 kiro.rs...', 'info', nodeId);
 
         const connection = await checkKiroRsConnection(kiroRsUrl, kiroRsKey, fetchImpl);
         await setState({
@@ -492,11 +505,11 @@
           kiroCredentialId: uploadResult.credentialId,
           kiroLastUploadAt: Date.now(),
           kiroUploadError: '',
-          kiroUploadStatus: uploadResult.message || 'uploaded',
+          kiroUploadStatus: normalizeKiroUploadMessage(uploadResult.message),
         };
 
         await setState(updates);
-        await log(`kiro.rs upload completed: ${updates.kiroUploadStatus}`, 'ok', nodeId);
+        await log(`kiro.rs 上传完成：${updates.kiroUploadStatus}`, 'ok', nodeId);
         await completeNodeFromBackground(nodeId, updates);
       } catch (error) {
         const message = getErrorMessage(error);
