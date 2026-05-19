@@ -66,6 +66,11 @@ const contributionUpdateLayer = document.getElementById('contribution-update-lay
 const contributionUpdateHint = document.getElementById('contribution-update-hint');
 const contributionUpdateHintText = document.getElementById('contribution-update-hint-text');
 const btnDismissContributionUpdateHint = document.getElementById('btn-dismiss-contribution-update-hint');
+const autoRunAdBar = document.getElementById('auto-run-ad-bar');
+const autoRunAdViewport = document.getElementById('auto-run-ad-viewport');
+const autoRunAdTrack = document.getElementById('auto-run-ad-track');
+const autoRunAdText = document.getElementById('auto-run-ad-text');
+const autoRunAdTextClone = document.getElementById('auto-run-ad-text-clone');
 const stepsProgress = document.getElementById('steps-progress');
 const btnAutoRun = document.getElementById('btn-auto-run');
 const btnAutoContinue = document.getElementById('btn-auto-continue');
@@ -1346,6 +1351,7 @@ let configActionInFlight = false;
 let currentReleaseSnapshot = null;
 let currentContributionContentSnapshot = null;
 let contributionContentSnapshotRequestInFlight = null;
+let autoRunAdScrollSyncFrame = 0;
 
 function normalizeAutomationWindowId(value) {
   if (value === null || value === undefined || value === '') {
@@ -11013,6 +11019,156 @@ function getContributionUpdatePromptLines(snapshot = currentContributionContentS
   return lines;
 }
 
+function getAutoRunAdConfig(snapshot = currentContributionContentSnapshot) {
+  const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+  const adItem = items.find((item) =>
+    item
+    && String(item.slug || '').trim().toLowerCase() === 'extension_auto_run_ad'
+  );
+  if (!adItem || !adItem.isVisible) {
+    return null;
+  }
+
+  const text = String(adItem.text || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    text,
+    title: String(adItem.title || '').trim(),
+  };
+}
+
+function sanitizeAutoRunAdUrl(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return '';
+    }
+    return parsed.href;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function parseAutoRunAdSegments(value = '') {
+  const rawText = String(value || '').trim();
+  if (!rawText) {
+    return [];
+  }
+
+  const segments = [];
+  let cursor = 0;
+
+  while (cursor < rawText.length) {
+    const labelStart = rawText.indexOf('[', cursor);
+    if (labelStart < 0) {
+      segments.push({
+        type: 'text',
+        text: rawText.slice(cursor),
+      });
+      break;
+    }
+
+    const labelEnd = rawText.indexOf(']', labelStart + 1);
+    if (labelEnd < 0 || rawText[labelEnd + 1] !== '(') {
+      segments.push({
+        type: 'text',
+        text: rawText.slice(cursor),
+      });
+      break;
+    }
+
+    if (labelStart > cursor) {
+      segments.push({
+        type: 'text',
+        text: rawText.slice(cursor, labelStart),
+      });
+    }
+
+    let urlEnd = labelEnd + 2;
+    let depth = 1;
+    while (urlEnd < rawText.length && depth > 0) {
+      const ch = rawText[urlEnd];
+      if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+      }
+      urlEnd += 1;
+    }
+
+    if (depth > 0) {
+      segments.push({
+        type: 'text',
+        text: rawText.slice(labelStart),
+      });
+      break;
+    }
+
+    const label = rawText.slice(labelStart + 1, labelEnd).trim();
+    const rawSegment = rawText.slice(labelStart, urlEnd);
+    const url = sanitizeAutoRunAdUrl(rawText.slice(labelEnd + 2, urlEnd - 1));
+    if (label && url) {
+      segments.push({
+        type: 'link',
+        text: label,
+        url,
+      });
+    } else {
+      segments.push({
+        type: 'text',
+        text: rawSegment,
+      });
+    }
+    cursor = urlEnd;
+  }
+
+  return segments.filter((segment) => String(segment?.text || '').length > 0);
+}
+
+function getAutoRunAdPlainText(segments = []) {
+  return segments.map((segment) => String(segment?.text || '')).join('').replace(/\s+/g, ' ').trim();
+}
+
+function renderAutoRunAdSegments(container, segments = [], options = {}) {
+  if (!container) {
+    return;
+  }
+
+  const { tabIndex = undefined } = options;
+  container.textContent = '';
+  for (const segment of Array.isArray(segments) ? segments : []) {
+    const text = String(segment?.text || '');
+    if (!text) {
+      continue;
+    }
+
+    if (segment?.type === 'link' && segment?.url) {
+      const link = document.createElement('a');
+      link.className = 'auto-run-ad-link';
+      link.href = segment.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.dataset.externalUrl = segment.url;
+      if (Number.isInteger(tabIndex)) {
+        link.tabIndex = tabIndex;
+      }
+      link.textContent = text;
+      container.appendChild(link);
+      continue;
+    }
+
+    container.appendChild(document.createTextNode(text));
+  }
+}
+
 function positionContributionUpdateHint() {
   if (!contributionUpdateLayer || !contributionUpdateHint || !btnContributionMode) {
     return;
@@ -11086,6 +11242,86 @@ function renderContributionUpdateHint(snapshot = currentContributionContentSnaps
   positionContributionUpdateHint();
 }
 
+function resetAutoRunAdScrollState() {
+  if (!autoRunAdBar || !autoRunAdTrack || !autoRunAdTextClone) {
+    return;
+  }
+  autoRunAdBar.classList.remove('is-scrolling');
+  autoRunAdBar.style.removeProperty('--auto-run-ad-gap');
+  autoRunAdBar.style.removeProperty('--auto-run-ad-duration');
+  autoRunAdBar.style.removeProperty('--auto-run-ad-scroll-distance');
+  autoRunAdTextClone.textContent = '';
+}
+
+function syncAutoRunAdScrollState() {
+  if (!autoRunAdBar || !autoRunAdViewport || !autoRunAdTrack || !autoRunAdText || !autoRunAdTextClone || autoRunAdBar.hidden) {
+    resetAutoRunAdScrollState();
+    return;
+  }
+
+  const text = String(autoRunAdText.textContent || '').trim();
+  if (!text) {
+    resetAutoRunAdScrollState();
+    return;
+  }
+
+  const viewportWidth = autoRunAdViewport.clientWidth || 0;
+  const textWidth = Math.ceil(autoRunAdText.getBoundingClientRect().width || 0);
+  if (!viewportWidth || !textWidth || textWidth <= viewportWidth) {
+    resetAutoRunAdScrollState();
+    return;
+  }
+
+  const scrollGap = 32;
+  const scrollDistance = textWidth + scrollGap;
+  const durationSeconds = Math.max(18, scrollDistance / 24);
+  autoRunAdBar.classList.add('is-scrolling');
+  autoRunAdBar.style.setProperty('--auto-run-ad-gap', `${scrollGap}px`);
+  autoRunAdBar.style.setProperty('--auto-run-ad-duration', `${durationSeconds.toFixed(2)}s`);
+  autoRunAdBar.style.setProperty('--auto-run-ad-scroll-distance', `${scrollDistance}px`);
+}
+
+function scheduleAutoRunAdScrollSync() {
+  if (autoRunAdScrollSyncFrame && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(autoRunAdScrollSyncFrame);
+    autoRunAdScrollSyncFrame = 0;
+  }
+
+  if (typeof window.requestAnimationFrame === 'function') {
+    autoRunAdScrollSyncFrame = window.requestAnimationFrame(() => {
+      autoRunAdScrollSyncFrame = 0;
+      syncAutoRunAdScrollState();
+    });
+    return;
+  }
+
+  syncAutoRunAdScrollState();
+}
+
+function renderAutoRunAd(snapshot = currentContributionContentSnapshot) {
+  if (!autoRunAdBar || !autoRunAdText || !autoRunAdTextClone) {
+    return;
+  }
+
+  const config = getAutoRunAdConfig(snapshot);
+  const visible = Boolean(config);
+  autoRunAdBar.hidden = !visible;
+  if (!visible) {
+    autoRunAdBar.title = '';
+    autoRunAdText.textContent = '';
+    autoRunAdTextClone.textContent = '';
+    resetAutoRunAdScrollState();
+    return;
+  }
+
+  const segments = parseAutoRunAdSegments(config.text);
+  const plainText = getAutoRunAdPlainText(segments);
+  autoRunAdBar.title = plainText || config.text;
+  renderAutoRunAdSegments(autoRunAdText, segments);
+  renderAutoRunAdSegments(autoRunAdTextClone, segments, { tabIndex: -1 });
+  scheduleAutoRunAdScrollSync();
+}
+
 function dismissContributionUpdateHint() {
   const promptVersion = String(currentContributionContentSnapshot?.promptVersion || '').trim();
   if (promptVersion) {
@@ -11098,6 +11334,7 @@ async function refreshContributionContentHint() {
   if (!contributionContentService?.getContentUpdateSnapshot) {
     currentContributionContentSnapshot = null;
     renderContributionUpdateHint();
+    renderAutoRunAd();
     return null;
   }
   if (contributionContentSnapshotRequestInFlight) {
@@ -11108,11 +11345,13 @@ async function refreshContributionContentHint() {
     .then((snapshot) => {
       currentContributionContentSnapshot = snapshot;
       renderContributionUpdateHint(snapshot);
+      renderAutoRunAd(snapshot);
       return snapshot;
     })
     .catch((error) => {
       currentContributionContentSnapshot = null;
       renderContributionUpdateHint(null);
+      renderAutoRunAd(null);
       throw error;
     })
     .finally(() => {
@@ -13631,6 +13870,12 @@ autoStartMessage?.addEventListener('click', (event) => {
   event.preventDefault();
   openExternalUrl(link.dataset.externalUrl || link.href);
 });
+autoRunAdBar?.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('a[data-external-url]');
+  if (!link) return;
+  event.preventDefault();
+  openExternalUrl(link.dataset.externalUrl || link.href);
+});
 btnAutoStartClose?.addEventListener('click', () => resolveModalChoice(null));
 
 async function startAutoRunFromCurrentSettings() {
@@ -13642,11 +13887,10 @@ async function startAutoRunFromCurrentSettings() {
     : getRunCountValue();
   registerPendingAutoRunStartRunCount(requestedTotalRuns);
 
-  try {
-    await refreshContributionContentHint();
-  } catch (error) {
+  // 站点内容刷新只影响提示/广告展示，不应阻塞自动流程启动。
+  refreshContributionContentHint().catch((error) => {
     console.warn('Failed to refresh contribution content hint before auto run:', error);
-  }
+  });
 
   if (typeof persistCurrentSettingsForAction === 'function') {
     await persistCurrentSettingsForAction();
@@ -16892,6 +17136,7 @@ document.addEventListener('keydown', (event) => {
 
 window.addEventListener('resize', () => {
   positionContributionUpdateHint();
+  scheduleAutoRunAdScrollSync();
 });
 
 document.addEventListener('scroll', () => {

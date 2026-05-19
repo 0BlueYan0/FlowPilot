@@ -151,7 +151,7 @@ return {
 `)();
 }
 
-test('startAutoRunFromCurrentSettings refreshes contribution content hint before starting auto run', async () => {
+test('startAutoRunFromCurrentSettings kicks off contribution content refresh without blocking auto run', async () => {
   const api = createApi();
 
   const result = await api.startAutoRunFromCurrentSettings();
@@ -175,10 +175,24 @@ test('startAutoRunFromCurrentSettings continues auto run when contribution conte
   assert.equal(result, true);
   assert.deepEqual(
     events.map((entry) => entry.type),
-    ['refresh', 'warn', 'sync-settings', 'send']
+    ['refresh', 'sync-settings', 'send', 'warn']
   );
-  assert.match(String(events[1].args[0]), /Failed to refresh contribution content hint before auto run/);
-  assert.equal(events[3].message.type, 'AUTO_RUN');
+  assert.equal(events[2].message.type, 'AUTO_RUN');
+  assert.match(String(events[3].args[0]), /Failed to refresh contribution content hint before auto run/);
+});
+
+test('startAutoRunFromCurrentSettings does not wait for a hanging contribution content refresh', async () => {
+  const api = createApi({
+    refreshImpl: '() => new Promise(() => {})',
+  });
+
+  const result = await api.startAutoRunFromCurrentSettings();
+
+  assert.equal(result, true);
+  assert.deepEqual(
+    api.getEvents().map((entry) => entry.type),
+    ['refresh', 'sync-settings', 'send']
+  );
 });
 
 test('startAutoRunFromCurrentSettings does not block auto run when contribution content has updates', async () => {
