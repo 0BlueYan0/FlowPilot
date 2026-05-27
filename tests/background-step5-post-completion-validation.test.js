@@ -202,6 +202,76 @@ return {
   );
 });
 
+test('step 5 post-completion validation accepts account chooser with selectable account', async () => {
+  const api = new Function(`
+const logs = [];
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/choose-an-account' };
+    },
+  },
+};
+
+async function sendToContentScriptResilient(source, message) {
+  if (message.type === 'GET_STEP5_SUBMIT_STATE') {
+    return {
+      retryPage: false,
+      retryEnabled: false,
+      maxCheckAttemptsBlocked: false,
+      userAlreadyExistsBlocked: false,
+      successState: 'account_chooser_available',
+      profileVisible: false,
+      errorText: '',
+      unknownAuthPage: false,
+      url: 'https://auth.openai.com/choose-an-account',
+    };
+  }
+  throw new Error('unexpected message type: ' + message.type);
+}
+
+async function addLog(message, level, meta) {
+  logs.push({ message, level, meta });
+}
+
+async function waitForTabStableComplete() {}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('isStep5CompletionChatgptUrl')}
+${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('recoverStep5SubmitRetryPageOnTab')}
+${extractFunction('validateStep5PostCompletion')}
+
+return {
+  run() {
+    return validateStep5PostCompletion(99, {});
+  },
+  snapshot() {
+    return { logs };
+  },
+};
+`)();
+
+  const result = await api.run();
+  assert.deepStrictEqual(result, {
+    retryPage: false,
+    retryEnabled: false,
+    maxCheckAttemptsBlocked: false,
+    userAlreadyExistsBlocked: false,
+    successState: 'account_chooser_available',
+    profileVisible: false,
+    errorText: '',
+    unknownAuthPage: false,
+    url: 'https://auth.openai.com/choose-an-account',
+  });
+  assert.equal(
+    api.snapshot().logs.some(({ message }) => /账号选择页/.test(message)),
+    true
+  );
+});
+
 test('step 5 recovers from bfcache transport close when tab already reached chatgpt', async () => {
   const api = new Function(`
 const logs = [];

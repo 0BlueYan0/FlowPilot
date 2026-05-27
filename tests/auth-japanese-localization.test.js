@@ -122,6 +122,57 @@ return {
   assert.equal(api.code(), 'コードでサインイン');
 });
 
+test('login step recognizes Traditional Chinese email and phone entry actions', () => {
+  const api = new Function(`
+const emailButton = {
+  textContent: '繼續使用電子郵件地址登入',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+const phoneButton = {
+  textContent: '繼續使用手機號碼登入',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+const document = {
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [phoneButton, emailButton];
+    }
+    return [];
+  },
+};
+
+${extractConst('ONE_TIME_CODE_LOGIN_PATTERN')}
+${extractConst('LOGIN_ENTRY_ACTION_PATTERN')}
+${extractConst('LOGIN_SWITCH_TO_PHONE_PATTERN')}
+${extractConst('LOGIN_PHONE_ACTION_PATTERN')}
+${extractConst('LOGIN_EXTERNAL_IDP_PATTERN')}
+${extractConst('LOGIN_CODE_ONLY_ACTION_PATTERN')}
+
+function isVisibleElement(el) { return Boolean(el); }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
+function getActionText(el) { return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(); }
+
+${extractFunction('findLoginEntryTrigger')}
+${extractFunction('findLoginPhoneEntryTrigger')}
+
+return {
+  email() { return getActionText(findLoginEntryTrigger()); },
+  phone() { return getActionText(findLoginPhoneEntryTrigger()); },
+};
+`)();
+
+  assert.equal(api.email(), '繼續使用電子郵件地址登入');
+  assert.equal(api.phone(), '繼續使用手機號碼登入');
+});
+
 test('login submit button recognizes Japanese login and continue labels', () => {
   const api = new Function(`
 const loginButton = {
@@ -157,6 +208,43 @@ return {
 `)();
 
   assert.equal(api.run(), 'ログイン');
+});
+
+test('login submit button recognizes Traditional Chinese login label', () => {
+  const api = new Function(`
+const loginButton = {
+  textContent: '登入',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'type') return 'button';
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+const document = {
+  querySelector() { return null; },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [loginButton];
+    }
+    return [];
+  },
+};
+
+${extractConst('ONE_TIME_CODE_LOGIN_PATTERN')}
+
+function isVisibleElement(el) { return Boolean(el); }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
+function getActionText(el) { return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(); }
+
+${extractFunction('getLoginSubmitButton')}
+
+return {
+  run() { return getActionText(getLoginSubmitButton()); },
+};
+`)();
+
+  assert.equal(api.run(), '登入');
 });
 
 test('verification helpers recognize Japanese resend and submit actions', () => {

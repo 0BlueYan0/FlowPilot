@@ -160,3 +160,47 @@ test('step6LoginFromPasswordPage returns a recoverable result when password is m
     cleanupGlobals();
   }
 });
+
+test('step6LoginFromPasswordPage does not switch to one-time-code login in password-only mode', async () => {
+  const api = createApi();
+  const snapshot = {
+    state: 'password_page',
+    passwordInput: null,
+    switchTrigger: { id: 'otp' },
+  };
+
+  globalThis.normalizeStep6Snapshot = (value) => value;
+  globalThis.inspectLoginAuthState = () => snapshot;
+  globalThis.log = () => {};
+  globalThis.step6SwitchToOneTimeCodeLogin = async () => {
+    throw new Error('should not switch to one-time-code login in password-only mode');
+  };
+  globalThis.createStep6RecoverableResult = (reason, stateSnapshot, details) => ({
+    step6Outcome: 'recoverable',
+    reason,
+    stateSnapshot,
+    ...details,
+  });
+  globalThis.fillInput = () => {
+    throw new Error('should not fill password without a password input');
+  };
+  globalThis.humanPause = async () => {};
+  globalThis.sleep = async () => {};
+  globalThis.triggerLoginSubmitAction = async () => {};
+  globalThis.waitForStep6PasswordSubmitTransition = async () => {
+    throw new Error('should not submit password without a password input');
+  };
+
+  try {
+    const result = await api.step6LoginFromPasswordPage({ passwordOnly: true, password: 'secret' }, snapshot);
+
+    assert.deepStrictEqual(result, {
+      step6Outcome: 'recoverable',
+      reason: 'password_page_unactionable',
+      stateSnapshot: snapshot,
+      message: '当前停留在登录页，但没有可提交密码的输入框，也没有一次性验证码登录入口。',
+    });
+  } finally {
+    cleanupGlobals();
+  }
+});

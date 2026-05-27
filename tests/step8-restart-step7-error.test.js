@@ -146,7 +146,81 @@ return {
   assert.equal(result.state, 'add_email_page');
 });
 
-test('step 8 reruns step 7 when auth page enters login timeout retry state', async () => {
+test('ensureStep8VerificationPageReady allows password page only when requested', async () => {
+  const api = new Function(`
+function getLoginAuthStateLabel(state) {
+  return state === 'password_page' ? '密码页' : 'unknown page';
+}
+
+async function getLoginAuthStateFromContent() {
+  return {
+    state: 'password_page',
+    url: 'https://auth.openai.com/log-in/password',
+  };
+}
+
+${extractFunction(backgroundSource, 'ensureStep8VerificationPageReady')}
+
+return {
+  run(options) {
+    return ensureStep8VerificationPageReady(options || {});
+  },
+};
+`)();
+
+  await assert.rejects(
+    () => api.run({}),
+    /当前未进入登录验证码页面/
+  );
+
+  const result = await api.run({ allowPasswordPage: true });
+  assert.equal(result.state, 'password_page');
+});
+
+test('ensureStep8VerificationPageReady allows password page after retry recovery when requested', async () => {
+  let inspectCalls = 0;
+  const api = new Function(`
+let inspectCalls = 0;
+
+function getLoginAuthStateLabel(state) {
+  return state === 'password_page' ? '密码页' : 'unknown page';
+}
+
+async function getLoginAuthStateFromContent() {
+  inspectCalls += 1;
+  if (inspectCalls === 1) {
+    return {
+      state: 'login_timeout_error_page',
+      url: 'https://auth.openai.com/log-in',
+    };
+  }
+  return {
+    state: 'password_page',
+    url: 'https://auth.openai.com/log-in/password',
+  };
+}
+
+async function sendToContentScriptResilient() {
+  return { recovered: true };
+}
+
+${extractFunction(backgroundSource, 'ensureStep8VerificationPageReady')}
+
+return {
+  async run(options) {
+    const result = await ensureStep8VerificationPageReady(options || {});
+    return { result, inspectCalls };
+  },
+};
+`)();
+
+  const { result, inspectCalls: finalInspectCalls } = await api.run({ allowPasswordPage: true });
+  assert.equal(result.state, 'password_page');
+  assert.equal(finalInspectCalls, 2);
+  assert.equal(inspectCalls, 0);
+});
+
+test('step 8 surfaces retry-state error without rerunning step 7', async () => {
   const calls = {
     rerunStep7: 0,
     ensureReady: 0,
@@ -204,26 +278,23 @@ test('step 8 reruns step 7 when auth page enters login timeout retry state', asy
     throwIfStopped: () => {},
   });
 
-  await executor.executeStep8({
-    email: 'user@example.com',
-    password: 'secret',
-    oauthUrl: 'https://oauth.example/latest',
-  });
+  await assert.rejects(
+    () => executor.executeStep8({
+      email: 'user@example.com',
+      password: 'secret',
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    /STEP8_RESTART_STEP7::step 8 timeout retry page/
+  );
 
-  assert.equal(calls.rerunStep7, 1);
-  assert.equal(calls.ensureReady, 2);
-  assert.equal(calls.resolveCalls, 1);
-  assert.equal(calls.logs.some(({ message }) => /重新开始|重新发起/.test(message)), true);
-  assert.deepStrictEqual(calls.rerunOptions, [
-    {
-      logMessage: '认证页进入重试/超时报错状态，正在回到步骤 7 重新发起登录流程...',
-      logStep: 8,
-      logStepKey: 'fetch-login-code',
-    },
-  ]);
+  assert.equal(calls.rerunStep7, 0);
+  assert.equal(calls.ensureReady, 1);
+  assert.equal(calls.resolveCalls, 0);
+  assert.equal(calls.logs.some(({ message }) => /重新开始|重新发起/.test(message)), false);
+  assert.deepStrictEqual(calls.rerunOptions, []);
 });
 
-test('step 8 escalates to rerun step 7 after too many local retry_without_step7 recoveries', async () => {
+test('step 8 stops on verification page without retry_without_step7 recovery', async () => {
   const calls = {
     rerunStep7: 0,
     ensureReady: 0,
@@ -283,13 +354,13 @@ test('step 8 escalates to rerun step 7 after too many local retry_without_step7 
       password: 'secret',
       oauthUrl: 'https://oauth.example/latest',
     }),
-    /RERUN_MARKER/
+    /OpenAI 要求登录验证码，已按设置停止，不再获取登录验证码/
   );
 
-  assert.equal(calls.rerunStep7, 1);
-  assert.equal(calls.ensureReady >= 4, true);
+  assert.equal(calls.rerunStep7, 0);
+  assert.equal(calls.ensureReady, 1);
   assert.equal(
     calls.logs.some(({ message }) => /连续重试 \d+ 次，改为回到步骤 7/.test(message)),
-    true
+    false
   );
 });

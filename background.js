@@ -13354,7 +13354,7 @@ async function resumeAutoRun() {
 // Signup / OAuth Helpers
 // ============================================================
 
-const SIGNUP_ENTRY_URL = 'https://chatgpt.com/';
+const SIGNUP_ENTRY_URL = 'https://auth.openai.com/create-account';
 const OPENAI_AUTH_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'flows/openai/content/auth-page-recovery.js', 'flows/openai/content/phone-country-utils.js', 'flows/openai/content/phone-auth.js', 'flows/openai/content/openai-auth.js'];
 const KIRO_REGISTER_INJECT_FILES = ['flows/openai/index.js', 'flows/kiro/index.js', 'flows/grok/index.js', 'flows/index.js', 'core/flow-kernel/flow-registry.js', 'core/flow-kernel/source-registry.js', 'shared/kiro-timeouts.js', 'content/utils.js', 'flows/kiro/content/register-page.js'];
 const KIRO_DESKTOP_AUTHORIZE_INJECT_FILES = ['flows/openai/index.js', 'flows/kiro/index.js', 'flows/grok/index.js', 'flows/index.js', 'core/flow-kernel/flow-registry.js', 'core/flow-kernel/source-registry.js', 'shared/kiro-timeouts.js', 'content/utils.js', 'flows/kiro/content/desktop-authorize-page.js'];
@@ -15077,6 +15077,18 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
       return pageState;
     }
 
+    if (pageState.successState === 'account_chooser_available') {
+      await debugLog('后台复核确认账号选择页已有可选账号，按注册成功继续。', {
+        completionOutcome: String(completionPayload?.outcome || '').trim(),
+        completionUrl: String(completionPayload?.url || '').trim(),
+        navigationStarted: Boolean(completionPayload?.navigationStarted),
+        tabUrl: currentUrl,
+        pageState,
+        level: 'ok',
+      });
+      return pageState;
+    }
+
     if (pageState.successState) {
       await debugLog('后台复核发现非 chatgpt.com 的步骤 5 完成候选，按未完成处理。', {
         completionOutcome: String(completionPayload?.outcome || '').trim(),
@@ -15150,6 +15162,7 @@ async function ensureStep8VerificationPageReady(options = {}) {
     || pageState.state === 'oauth_consent_page'
     || (options.allowPhoneVerificationPage && pageState.state === 'phone_verification_page')
     || (options.allowAddEmailPage && pageState.state === 'add_email_page')
+    || (options.allowPasswordPage && pageState.state === 'password_page')
   ) {
     return pageState;
   }
@@ -15229,6 +15242,7 @@ async function ensureStep8VerificationPageReady(options = {}) {
         || pageState.state === 'oauth_consent_page'
         || (options.allowPhoneVerificationPage && pageState.state === 'phone_verification_page')
         || (options.allowAddEmailPage && pageState.state === 'add_email_page')
+        || (options.allowPasswordPage && pageState.state === 'password_page')
       ) {
         return pageState;
       }

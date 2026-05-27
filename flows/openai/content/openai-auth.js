@@ -201,11 +201,11 @@ const VERIFICATION_CODE_INPUT_SELECTOR = [
 ].join(', ');
 
 const ONE_TIME_CODE_LOGIN_PATTERN = /使用一次性验证码登录|改用(?:一次性)?验证码(?:登录)?|使用验证码登录|一次性验证码|验证码登录|ワンタイム(?:コード|パスコード)|一回限りの?(?:コード|パスコード)|(?:認証|確認)?コード(?:で|を使用して)?(?:ログイン|サインイン)|one[-\s]*time\s*(?:passcode|password|code)|use\s+(?:a\s+)?one[-\s]*time\s*(?:passcode|password|code)(?:\s+instead)?|use\s+(?:a\s+)?code(?:\s+instead)?|sign\s+in\s+with\s+(?:email|code)|email\s+(?:me\s+)?(?:a\s+)?code/i;
-const LOGIN_ENTRY_ACTION_PATTERN = /(?:^|\b)(?:log\s*in|sign\s*in|continue\s+(?:with|using)\s+(?:email|chatgpt)|use\s+(?:an?\s+)?email|email\s+address)(?:\b|$)|登录|登陆|邮箱|电子邮件|ログイン|サインイン|メールアドレス|メール|電子メール/i;
-const LOGIN_SWITCH_TO_PHONE_PATTERN = /继续使用(?:手机|手机号|电话)(?:号码)?登录|改用(?:手机|手机号|电话)(?:号码)?登录|手机号登录|(?:電話番号|電話|携帯電話|携帯)(?:で|を使用して)?(?:続行|続ける|ログイン|サインイン)|(?:続行|続ける|使用|ログイン|サインイン).*(?:電話番号|電話|携帯電話|携帯)|continue\s+(?:with|using)\s+(?:a\s+)?phone(?:\s+number)?|use\s+(?:a\s+)?phone(?:\s+number)?(?:\s+instead)?|sign\s*in\s+with\s+(?:a\s+)?phone/i;
-const LOGIN_PHONE_ACTION_PATTERN = /手机|电话|phone|telephone|電話番号|電話|携帯電話|携帯/i;
-const LOGIN_PHONE_ENTRY_PAGE_PATTERN = /(?:\+\s*\(?\d{1,4}\)?\s*)?(?:手机号码|手机号|电话号码|電話番号|携帯電話番号|携帯番号)|(?:phone|mobile)\s+number|telephone/i;
-const LOGIN_MORE_OPTIONS_PATTERN = /更多(?:选项|登录方式|方式)|其他(?:登录方式|选项|方式)|显示更多|その他|他の(?:ログイン)?方法|別の(?:ログイン)?方法|もっと見る|オプション|more\s+(?:login\s+|sign[-\s]*in\s+)?options|other\s+(?:login\s+|sign[-\s]*in\s+)?(?:options|ways)|show\s+more/i;
+const LOGIN_ENTRY_ACTION_PATTERN = /(?:^|\b)(?:log\s*in|sign\s*in|continue\s+(?:with|using)\s+(?:email|chatgpt)|use\s+(?:an?\s+)?email|email\s+address)(?:\b|$)|登录|登入|登陆|邮箱|電子郵件|電子信箱|邮箱|电子邮件|ログイン|サインイン|メールアドレス|メール|電子メール/i;
+const LOGIN_SWITCH_TO_PHONE_PATTERN = /继续使用(?:手机|手机号|电话)(?:号码)?登录|改用(?:手机|手机号|电话)(?:号码)?登录|手机号登录|(?:繼續使用|改用|使用)(?:手機|手機號|手機號碼|電話號碼)(?:登入)?|手機號登入|(?:電話番号|電話|携帯電話|携帯)(?:で|を使用して)?(?:続行|続ける|ログイン|サインイン)|(?:続行|続ける|使用|ログイン|サインイン).*(?:電話番号|電話|携帯電話|携帯)|continue\s+(?:with|using)\s+(?:a\s+)?phone(?:\s+number)?|use\s+(?:a\s+)?phone(?:\s+number)?(?:\s+instead)?|sign\s*in\s+with\s+(?:a\s+)?phone/i;
+const LOGIN_PHONE_ACTION_PATTERN = /手机|电话|手機|電話|phone|telephone|電話番号|携帯電話|携帯/i;
+const LOGIN_PHONE_ENTRY_PAGE_PATTERN = /(?:\+\s*\(?\d{1,4}\)?\s*)?(?:手机号码|手机号|电话号码|手機號碼|手機號|電話號碼|電話番号|携帯電話番号|携帯番号)|(?:phone|mobile)\s+number|telephone/i;
+const LOGIN_MORE_OPTIONS_PATTERN = /更多(?:选项|登录方式|方式)|其他(?:登录方式|选项|方式)|显示更多|更多(?:選項|登入方式|方式)|其他(?:登入方式|選項|方式)|顯示更多|その他|他の(?:ログイン)?方法|別の(?:ログイン)?方法|もっと見る|オプション|more\s+(?:login\s+|sign[-\s]*in\s+)?options|other\s+(?:login\s+|sign[-\s]*in\s+)?(?:options|ways)|show\s+more/i;
 const LOGIN_EXTERNAL_IDP_PATTERN = /google|microsoft|apple|sso|single\s+sign[-\s]*on|企业|工作区|workspace/i;
 const LOGIN_CODE_ONLY_ACTION_PATTERN = /one[-\s]*time|passcode|use\s+(?:a\s+)?code|验证码|一次性|ワンタイム|パスコード|認証コード|確認コード/i;
 
@@ -525,6 +525,7 @@ async function handle405ResendError(step, remainingTimeout = 30000) {
 // ============================================================
 
 const SIGNUP_ENTRY_TRIGGER_PATTERN = /免费注册|立即注册|注册|無料でサインアップ|サインアップ|新規登録|登録する|登録|アカウントを作成|アカウント作成|sign\s*up|register|create\s*account|create\s+account/i;
+const SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL = 'https://auth.openai.com/log-in-or-create-account';
 const SIGNUP_EMAIL_INPUT_SELECTOR = [
   'input[type="email"]',
   'input[autocomplete="email"]',
@@ -572,6 +573,7 @@ const SIGNUP_SWITCH_TO_PHONE_PATTERN = new RegExp([
   String.raw`\u7ee7\u7eed\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
   String.raw`\u6539\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
   String.raw`\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
+  String.raw`(?:\u7e7c\u7e8c\u4f7f\u7528|\u6539\u7528|\u4f7f\u7528)(?:\u624b\u6a5f|\u624b\u6a5f\u865f|\u624b\u6a5f\u865f\u78bc|\u96fb\u8a71\u865f\u78bc)(?:\u767b\u5165)?`,
   String.raw`(?:電話番号|電話|携帯電話|携帯)(?:で|を使用して)?(?:続行|続ける|ログイン|サインイン|サインアップ)`,
   String.raw`(?:続行|続ける|使用|ログイン|サインイン|サインアップ).*(?:電話番号|電話|携帯電話|携帯)`,
   String.raw`continue\s+(?:with|using)\s+(?:a\s+)?phone(?:\s+number)?`,
@@ -663,6 +665,26 @@ function findSignupMoreOptionsTrigger() {
     const state = String(el.getAttribute?.('data-state') || '').trim().toLowerCase();
     return expanded !== 'true' && state !== 'open';
   }) || null;
+}
+
+function openSignupBridgeUrl(url = SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL) {
+  const targetUrl = String(url || '').trim();
+  if (!targetUrl) return;
+  if (typeof location?.assign === 'function') {
+    location.assign(targetUrl);
+  } else {
+    location.href = targetUrl;
+  }
+}
+
+function isSignupLoginOrCreateAccountUrl(rawUrl = location.href) {
+  try {
+    const parsed = new URL(String(rawUrl || ''), location.href);
+    return parsed.origin === 'https://auth.openai.com'
+      && /^\/log-in-or-create-account\/?$/i.test(parsed.pathname || '');
+  } catch {
+    return false;
+  }
 }
 
 function getSignupEmailContinueButton({ allowDisabled = false } = {}) {
@@ -798,6 +820,26 @@ function inspectSignupEntryState() {
       signupTrigger,
       url: location.href,
     };
+  }
+
+  const pageText = typeof getPageTextSnapshot === 'function'
+    ? getPageTextSnapshot()
+    : String(document.body?.innerText || document.documentElement?.innerText || '').trim();
+  const isSessionEndedInterstitial = /工作階段已結束|工作阶段已结束|session\s+(?:has\s+)?ended/i.test(pageText);
+  if (isSessionEndedInterstitial) {
+    const loginTrigger = Array.from(document.querySelectorAll('a, button, [role="button"], [role="link"]'))
+      .find((el) => {
+        if (!isVisibleElement(el) || !isActionEnabled(el)) return false;
+        return /登入|登录|log\s*in|sign\s*in/i.test(getActionText(el));
+      }) || null;
+    if (loginTrigger) {
+      return {
+        state: 'entry_home',
+        signupTrigger: loginTrigger,
+        signupBridgeUrl: SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL,
+        url: location.href,
+      };
+    }
   }
 
   return {
@@ -1198,6 +1240,11 @@ async function waitForSignupEntryState(options = {}) {
         await performOperationWithDelay({ stepKey: 'signup-entry', kind: 'click', label: 'open-signup-entry' }, async () => {
           simulateClick(clickTarget);
         });
+        if (snapshot.signupBridgeUrl) {
+          await sleep(1500);
+          lastBridgeOpenAt = Date.now();
+          openSignupBridgeUrl(snapshot.signupBridgeUrl);
+        }
       }
     }
 
@@ -2434,6 +2481,7 @@ async function waitForSignupPhoneEntryState(options = {}) {
   let clickAttempts = 0;
   let lastSwitchToPhoneAt = 0;
   let lastMoreOptionsClickAt = 0;
+  let lastBridgeOpenAt = 0;
   let slowSnapshotLogged = false;
 
   while (Date.now() - start < timeout) {
@@ -2451,6 +2499,15 @@ async function waitForSignupPhoneEntryState(options = {}) {
     if (snapshot.state === 'email_entry') {
       const switchToPhone = snapshot.switchToPhoneTrigger || findSignupUsePhoneTrigger();
       if (switchToPhone && Date.now() - lastSwitchToPhoneAt >= 1500) {
+        if (!isSignupLoginOrCreateAccountUrl(location.href)) {
+          if (Date.now() - lastBridgeOpenAt >= 1500) {
+            lastBridgeOpenAt = Date.now();
+            log(`步骤 ${step}：检测到手机号入口，但当前 URL 不是登录/注册桥接页，先打开 ${SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL}...`);
+            openSignupBridgeUrl(SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL);
+          }
+          await sleep(250);
+          continue;
+        }
         lastSwitchToPhoneAt = Date.now();
         log(`步骤 ${step}：检测到邮箱输入模式，正在切换到手机号注册入口...`);
         await humanPause(350, 900);
@@ -2497,6 +2554,11 @@ async function waitForSignupPhoneEntryState(options = {}) {
         await performOperationWithDelay({ stepKey: 'signup-phone-entry', kind: 'click', label: 'open-signup-entry' }, async () => {
           simulateClick(clickTarget);
         });
+        if (snapshot.signupBridgeUrl) {
+          await sleep(1500);
+          lastBridgeOpenAt = Date.now();
+          openSignupBridgeUrl(snapshot.signupBridgeUrl);
+        }
       }
       await sleep(250);
       continue;
@@ -3970,7 +4032,7 @@ function getLoginSubmitButton({ allowDisabled = false } = {}) {
     if (!isVisibleElement(el) || (!allowDisabled && !isActionEnabled(el))) return false;
     const text = getActionText(el);
     if (!text || ONE_TIME_CODE_LOGIN_PATTERN.test(text)) return false;
-    return /continue|next|submit|sign\s*in|log\s*in|继续|下一步|登录|続行|続ける|次へ|ログイン|サインイン|送信/i.test(text);
+    return /continue|next|submit|sign\s*in|log\s*in|继续|下一步|登录|繼續|下一步|登入|続行|続ける|次へ|ログイン|サインイン|送信/i.test(text);
   }) || null;
 }
 
@@ -4138,7 +4200,7 @@ function findLoginEntryTrigger() {
   const preferred = candidates.find((el) => {
     const text = getActionText(el);
     if (!text || LOGIN_CODE_ONLY_ACTION_PATTERN.test(text) || LOGIN_EXTERNAL_IDP_PATTERN.test(text)) return false;
-    return /continue\s+(?:with|using)\s+email|use\s+(?:an?\s+)?email|email\s+address|邮箱|电子邮件|メールアドレス|メール|電子メール/i.test(text);
+    return /continue\s+(?:with|using)\s+email|use\s+(?:an?\s+)?email|email\s+address|邮箱|电子邮件|電子郵件|電子信箱|メールアドレス|メール|電子メール/i.test(text);
   });
   if (preferred) return preferred;
 
@@ -4160,7 +4222,7 @@ function findLoginPhoneEntryTrigger() {
     return LOGIN_SWITCH_TO_PHONE_PATTERN.test(text)
       || (
         LOGIN_PHONE_ACTION_PATTERN.test(text)
-        && !/email|邮箱|电子邮件|メールアドレス|メール|電子メール/i.test(text)
+        && !/email|邮箱|电子邮件|電子郵件|電子信箱|メールアドレス|メール|電子メール/i.test(text)
       );
   }) || null;
 }
@@ -5974,10 +6036,11 @@ async function step6LoginFromPasswordPage(payload, snapshot) {
   const visibleStep = Math.floor(Number(payload?.visibleStep) || 0) || 7;
   const currentSnapshot = normalizeStep6Snapshot(snapshot || inspectLoginAuthState());
   const hasPassword = Boolean(String(payload?.password || '').trim());
+  const passwordOnly = Boolean(payload?.passwordOnly);
 
   if (currentSnapshot.passwordInput) {
     if (!hasPassword) {
-      if (currentSnapshot.switchTrigger) {
+      if (!passwordOnly && currentSnapshot.switchTrigger) {
         log('当前未提供密码，改走一次性验证码登录。', 'warn', { step: visibleStep, stepKey: 'oauth-login' });
         return step6SwitchToOneTimeCodeLogin(payload, currentSnapshot);
       }
@@ -6023,7 +6086,7 @@ async function step6LoginFromPasswordPage(payload, snapshot) {
     if (transition.action === 'email') {
       return step6LoginFromEmailPage(payload, transition.snapshot);
     }
-    if (transition.action === 'switch') {
+    if (!passwordOnly && transition.action === 'switch') {
       return step6SwitchToOneTimeCodeLogin(payload, transition.snapshot);
     }
 
@@ -6032,7 +6095,7 @@ async function step6LoginFromPasswordPage(payload, snapshot) {
     });
   }
 
-  if (currentSnapshot.switchTrigger) {
+  if (!passwordOnly && currentSnapshot.switchTrigger) {
     return step6SwitchToOneTimeCodeLogin(payload, currentSnapshot);
   }
 
@@ -6749,6 +6812,35 @@ function isStep5ProfileStillVisible() {
   return typeof isStep5Ready === 'function' ? isStep5Ready() : false;
 }
 
+function isStep5AccountChooserPageUrl(rawUrl = location.href) {
+  const url = String(rawUrl || '').trim();
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const protocol = String(parsed.protocol || '').toLowerCase();
+    const host = String(parsed.hostname || '').toLowerCase();
+    if (protocol !== 'https:' || host !== 'auth.openai.com') {
+      return false;
+    }
+
+    return /^\/choose-an-account(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
+  } catch {
+    return false;
+  }
+}
+
+function hasStep5SelectableAccountChoice() {
+  const candidates = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+  return Array.from(candidates).some((el) => Boolean(el) && isVisibleElement(el) && isActionEnabled(el));
+}
+
+function isStep5AccountChooserAvailable() {
+  return isStep5AccountChooserPageUrl() && hasStep5SelectableAccountChoice();
+}
+
 function getStep5PostSubmitSuccessState() {
   if (getStep5AuthRetryPageState()) {
     return null;
@@ -6757,6 +6849,13 @@ function getStep5PostSubmitSuccessState() {
   if (isStep5CompletionChatgptUrl()) {
     return {
       state: 'logged_in_home',
+      url: location.href,
+    };
+  }
+
+  if (isStep5AccountChooserAvailable()) {
+    return {
+      state: 'account_chooser_available',
       url: location.href,
     };
   }

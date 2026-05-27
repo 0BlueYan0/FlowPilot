@@ -131,6 +131,7 @@ const Date = {
 };
 
 ${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
 ${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
@@ -309,6 +310,7 @@ const Date = {
 };
 
 ${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
 ${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
@@ -960,6 +962,7 @@ function simulateClick(target) {
   clicks.push(getActionText(target));
   if (target === signupButton) {
     phase = 'email';
+    location.href = 'https://auth.openai.com/log-in-or-create-account';
   } else if (target === switchButton) {
     phase = 'phone';
   }
@@ -977,7 +980,10 @@ ${extractFunction('findSignupMoreOptionsTrigger')}
 ${extractFunction('getSignupEmailContinueButton')}
 ${extractFunction('findSignupEntryTrigger')}
 ${extractFunction('inspectSignupEntryState')}
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
 ${extractFunction('waitForSignupPhoneEntryState')}
+function getSignupEntryStateSummary(snapshot) { return { state: snapshot?.state || 'unknown' }; }
 function getSignupEntryDiagnostics() { return {}; }
 ${extractFunction('ensureSignupPhoneEntryReady')}
 
@@ -996,9 +1002,230 @@ return {
   assert.deepEqual(result, {
     ready: true,
     state: 'phone_entry',
-    url: 'https://chatgpt.com/',
+    url: 'https://auth.openai.com/log-in-or-create-account',
   });
   assert.deepEqual(api.getClicks(), ['免费注册', 'Continue with phone number']);
+});
+
+test('ensureSignupPhoneEntryReady opens login from session-ended interstitial before switching to phone entry', async () => {
+  const api = new Function(`
+const logs = [];
+const clicks = [];
+const navigations = [];
+const eventTimes = [];
+let phase = 'session-ended';
+let now = 0;
+let pendingBridgeLoadAt = 0;
+
+const loginButton = {
+  textContent: '\u767b\u5165',
+  value: '',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'type') return 'button';
+    return '';
+  },
+  getBoundingClientRect() {
+    return { width: 120, height: 36 };
+  },
+};
+
+const switchButton = {
+  textContent: '\u4f7f\u7528\u624b\u6a5f\u865f\u78bc\u767b\u5165',
+  value: '',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'type') return 'button';
+    return '';
+  },
+  getBoundingClientRect() {
+    return { width: 200, height: 48 };
+  },
+};
+
+const emailInput = {
+  kind: 'email',
+  getAttribute(name) {
+    if (name === 'type') return 'email';
+    return '';
+  },
+};
+
+const phoneInput = {
+  kind: 'phone',
+  getAttribute(name) {
+    if (name === 'type') return 'tel';
+    return '';
+  },
+};
+
+const document = {
+  querySelector(selector) {
+    if (selector === SIGNUP_EMAIL_INPUT_SELECTOR) {
+      return phase === 'email' ? emailInput : null;
+    }
+    if (selector === SIGNUP_PHONE_INPUT_SELECTOR) {
+      return phase === 'phone' ? phoneInput : null;
+    }
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"]') {
+      if (phase === 'session-ended') return [loginButton];
+      if (phase === 'email') return [switchButton];
+      return [];
+    }
+    if (selector === 'a, button, [role="button"], [role="link"]') {
+      return phase === 'session-ended' ? [loginButton] : [];
+    }
+    if (selector === 'input') {
+      if (phase === 'email') return [emailInput];
+      if (phase === 'phone') return [phoneInput];
+      return [];
+    }
+    return [];
+  },
+};
+
+const location = {
+  href: 'https://chatgpt.com/',
+  assign(url) {
+    eventTimes.push({ type: 'bridge-navigation', now });
+    navigations.push(url);
+    pendingBridgeLoadAt = now + 1000;
+    phase = 'email';
+  },
+};
+
+const Date = {
+  now() {
+    return now;
+  },
+};
+
+${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
+${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
+${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
+${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
+${extractConst('SIGNUP_SWITCH_ACTION_PATTERN')}
+${extractConst('SIGNUP_EMAIL_ACTION_PATTERN')}
+${extractConst('SIGNUP_WORK_EMAIL_PATTERN')}
+${extractConst('SIGNUP_PHONE_ACTION_PATTERN')}
+${extractConst('SIGNUP_SWITCH_TO_PHONE_PATTERN')}
+${extractConst('SIGNUP_MORE_OPTIONS_PATTERN')}
+
+function isVisibleElement(el) {
+  return Boolean(el);
+}
+
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+}
+
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getSignupPasswordInput() {
+  return null;
+}
+
+function isSignupPasswordPage() {
+  return false;
+}
+
+function getSignupPasswordSubmitButton() {
+  return null;
+}
+
+function getSignupPasswordDisplayedEmail() {
+  return '';
+}
+
+function getPageTextSnapshot() {
+  return phase === 'session-ended'
+    ? '\u4f60\u7684\u5de5\u4f5c\u968e\u6bb5\u5df2\u7d50\u675f \u8acb\u767b\u5165\u4ee5\u7e7c\u7e8c\uff0c\u6216\u4e0d\u4f7f\u7528\u5e33\u6236\u767b\u5165\u4ee5\u4f7f\u7528 ChatGPT.com'
+    : '';
+}
+
+function throwIfStopped() {}
+
+function log(message, level = 'info') {
+  logs.push({ message, level });
+}
+
+async function humanPause() {}
+
+function simulateClick(target) {
+  eventTimes.push({ type: getActionText(target), now, href: location.href });
+  clicks.push(getActionText(target));
+  if (target === loginButton) {
+    phase = 'login-clicked';
+  } else if (target === switchButton) {
+    phase = 'phone';
+  }
+}
+
+async function sleep(ms) {
+  now += ms;
+  if (pendingBridgeLoadAt && now >= pendingBridgeLoadAt) {
+    location.href = 'https://auth.openai.com/log-in-or-create-account';
+    pendingBridgeLoadAt = 0;
+    eventTimes.push({ type: 'bridge-loaded', now, href: location.href });
+  }
+}
+
+${extractFunction('getSignupEmailInput')}
+${extractFunction('getSignupPhoneInput')}
+${extractFunction('findSignupUseEmailTrigger')}
+${extractFunction('findSignupUsePhoneTrigger')}
+${extractFunction('findSignupMoreOptionsTrigger')}
+${extractFunction('getSignupEmailContinueButton')}
+${extractFunction('findSignupEntryTrigger')}
+${extractFunction('inspectSignupEntryState')}
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
+${extractFunction('waitForSignupPhoneEntryState')}
+function getSignupEntryStateSummary(snapshot) { return { state: snapshot?.state || 'unknown' }; }
+function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('ensureSignupPhoneEntryReady')}
+
+return {
+  async run() {
+    return ensureSignupPhoneEntryReady();
+  },
+  getClicks() {
+    return clicks.slice();
+  },
+  getNavigations() {
+    return navigations.slice();
+  },
+  getEventTimes() {
+    return eventTimes.slice();
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.deepEqual(result, {
+    ready: true,
+    state: 'phone_entry',
+    url: 'https://auth.openai.com/log-in-or-create-account',
+  });
+  assert.deepEqual(api.getClicks(), ['\u767b\u5165', '\u4f7f\u7528\u624b\u6a5f\u865f\u78bc\u767b\u5165']);
+  assert.deepEqual(api.getNavigations(), ['https://auth.openai.com/log-in-or-create-account']);
+  const events = api.getEventTimes();
+  const loginClick = events.find((event) => event.type === '\u767b\u5165');
+  const bridgeNavigation = events.find((event) => event.type === 'bridge-navigation');
+  const phoneClick = events.find((event) => event.type === '\u4f7f\u7528\u624b\u6a5f\u865f\u78bc\u767b\u5165');
+  assert.ok(bridgeNavigation.now - loginClick.now >= 1500);
+  assert.equal(phoneClick.href, 'https://auth.openai.com/log-in-or-create-account');
 });
 
 test('waitForSignupPhoneEntryState retries the signup entry click five times before giving up', async () => {
@@ -1033,7 +1260,7 @@ const document = {
 };
 
 const location = {
-  href: 'https://chatgpt.com/',
+  href: 'https://auth.openai.com/log-in-or-create-account',
 };
 
 const Date = {
@@ -1043,6 +1270,7 @@ const Date = {
 };
 
 ${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
 ${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
@@ -1368,6 +1596,8 @@ ${extractFunction('getSignupEmailContinueButton')}
 ${extractFunction('inspectSignupEntryState')}
 ${extractFunction('getSignupEntryStateSummary')}
 function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
 ${extractFunction('normalizePhoneDigits')}
 ${extractFunction('extractDialCodeFromText')}
 ${extractFunction('dispatchSignupPhoneFieldEvents')}
@@ -1583,7 +1813,7 @@ const document = {
 };
 
 const location = {
-  href: 'https://chatgpt.com/',
+  href: 'https://auth.openai.com/log-in-or-create-account',
 };
 
 const window = {
@@ -1675,6 +1905,7 @@ async function sleep(ms) {
 }
 
 ${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
 ${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
@@ -1694,6 +1925,8 @@ ${extractFunction('getSignupEmailContinueButton')}
 ${extractFunction('inspectSignupEntryState')}
 ${extractFunction('getSignupEntryStateSummary')}
 function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
 ${extractFunction('normalizePhoneDigits')}
 ${extractFunction('extractDialCodeFromText')}
 ${extractFunction('dispatchSignupPhoneFieldEvents')}
@@ -1953,6 +2186,8 @@ ${extractFunction('getSignupEmailContinueButton')}
 ${extractFunction('inspectSignupEntryState')}
 ${extractFunction('getSignupEntryStateSummary')}
 function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
 ${extractFunction('normalizePhoneDigits')}
 ${extractFunction('extractDialCodeFromText')}
 ${extractFunction('dispatchSignupPhoneFieldEvents')}
@@ -2107,7 +2342,7 @@ const document = {
 };
 
 const location = {
-  href: 'https://chatgpt.com/',
+  href: 'https://auth.openai.com/log-in-or-create-account',
 };
 
 const window = {
@@ -2123,6 +2358,7 @@ const Date = {
 };
 
 ${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_LOGIN_OR_CREATE_ACCOUNT_URL')}
 ${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
 ${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
@@ -2207,6 +2443,8 @@ ${extractFunction('getSignupEmailContinueButton')}
 ${extractFunction('inspectSignupEntryState')}
 ${extractFunction('getSignupEntryStateSummary')}
 function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('openSignupBridgeUrl')}
+${extractFunction('isSignupLoginOrCreateAccountUrl')}
 ${extractFunction('normalizePhoneDigits')}
 ${extractFunction('extractDialCodeFromText')}
 ${extractFunction('dispatchSignupPhoneFieldEvents')}

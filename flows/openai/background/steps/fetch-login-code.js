@@ -336,51 +336,6 @@
       }
     }
 
-    function isStep8AddPhoneStateError(error) {
-      const message = String(error?.message || error || '');
-      return /add-phone|手机号页面|手机号验证页|phone[\s-_]verification|phone\s+number/i.test(message);
-    }
-
-    async function recoverStep8PollingFailure(currentState, visibleStep) {
-      const authLoginStep = getAuthLoginStepForState(currentState, visibleStep);
-      try {
-        const pageState = await ensureStep8VerificationPageReady({
-          visibleStep,
-          authLoginStep,
-          allowPhoneVerificationPage: true,
-          allowAddEmailPage: true,
-          timeoutMs: await getStep8ReadyTimeoutMs(
-            '登录验证码轮询异常后复核认证页状态',
-            currentState?.oauthUrl || '',
-            visibleStep
-          ),
-        });
-        if (pageState?.state === 'oauth_consent_page') {
-          await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { fromRecovery: true, nodeId: currentState?.nodeId });
-          return { outcome: 'completed' };
-        }
-        if (pageState?.state === 'verification_page' || pageState?.state === 'phone_verification_page' || pageState?.state === 'add_email_page') {
-          await addLog(
-            `步骤 ${visibleStep}：检测到邮箱轮询/页面通信异常，但认证页仍在当前登录后续页面，先在当前链路重试，不回到步骤 ${authLoginStep}。`,
-            'warn'
-          );
-          return { outcome: 'retry_without_step7' };
-        }
-      } catch (inspectError) {
-        if (isStep8RestartStep7Error(inspectError)) {
-          return { outcome: 'restart_step7', error: inspectError };
-        }
-        if (isStep8AddPhoneStateError(inspectError)) {
-          throw inspectError;
-        }
-        await addLog(
-          `步骤 ${visibleStep}：轮询失败后复核认证页状态异常：${inspectError?.message || inspectError}，将回到步骤 ${authLoginStep} 重试。`,
-          'warn'
-        );
-      }
-      return { outcome: 'restart_step7' };
-    }
-
     function getExpectedMail2925MailboxEmail(state = {}) {
       if (Boolean(state?.mail2925UseAccountPool)) {
         const currentAccountId = String(state?.currentMail2925AccountId || '').trim();
@@ -415,38 +370,6 @@
         inject: mail.inject,
         injectSource: mail.injectSource,
       });
-    }
-
-    function getStep8ResendIntervalMs(state = {}) {
-      const mail = getMailConfig(state);
-      if (mail?.provider === LUCKMAIL_PROVIDER) {
-        return 15000;
-      }
-      if (mail?.provider === HOTMAIL_PROVIDER || mail?.provider === '2925') {
-        return 0;
-      }
-      return Math.max(0, Number(STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS) || 0);
-    }
-
-    async function executeLoginPhoneCodeStep(state, signupTabId, visibleStep) {
-      if (!Number.isInteger(signupTabId)) {
-        throw new Error(`步骤 ${visibleStep}：认证页面标签页已关闭，无法继续手机号登录验证码流程。`);
-      }
-      if (typeof phoneVerificationHelpers?.completeLoginPhoneVerificationFlow !== 'function') {
-        throw new Error(`步骤 ${visibleStep}：手机号登录验证码流程不可用，接码模块尚未初始化。`);
-      }
-
-      const result = await phoneVerificationHelpers.completeLoginPhoneVerificationFlow(signupTabId, {
-        state,
-        visibleStep,
-      });
-
-      await completeNodeFromBackground(state?.nodeId || 'fetch-login-code', {
-        phoneVerification: true,
-        loginPhoneVerification: true,
-        code: result?.code || '',
-      });
-      return result || {};
     }
 
     async function ensureAuthTabForPostLoginStep(state, visibleStep) {
@@ -772,7 +695,116 @@
       });
     }
 
-    async function runStep8Attempt(state, runtime = {}) {
+    function resolveStep8Password(state = {}) {
+      return String(state?.customPassword || state?.password || '');
+    }
+
+    function resolveStep8LoginIdentifier(state = {}) {
+      const identifierType = isPhoneLoginCodeMode(state) ? 'phone' : 'email';
+      if (identifierType === 'phone') {
+        const phoneNumber = String(
+          state?.signupPhoneNumber
+          || (normalizeIdentifierType(state?.accountIdentifierType) === 'phone' ? state?.accountIdentifier : '')
+          || state?.signupPhoneCompletedActivation?.phoneNumber
+          || state?.signupPhoneActivation?.phoneNumber
+          || ''
+        ).trim();
+        return {
+          loginIdentifierType: 'phone',
+          phoneNumber,
+          email: '',
+          accountIdentifier: phoneNumber,
+        };
+      }
+
+      const email = String(
+        state?.email
+        || (normalizeIdentifierType(state?.accountIdentifierType) === 'email' ? state?.accountIdentifier : '')
+        || ''
+      ).trim();
+      return {
+        loginIdentifierType: 'email',
+        phoneNumber: '',
+        email,
+        accountIdentifier: email,
+      };
+    }
+
+    function throwStep8VerificationStopped(pageState = {}, visibleStep = 8) {
+      const state = pageState?.state || 'unknown';
+      const url = pageState?.url || '';
+      if (state === 'phone_verification_page') {
+        throw new Error(`步骤 ${visibleStep}：OpenAI 要求手机登录验证码，已按设置停止，不再获取登录验证码。URL: ${url}`.trim());
+      }
+      if (state === 'verification_page') {
+        throw new Error(`步骤 ${visibleStep}：OpenAI 要求登录验证码，已按设置停止，不再获取登录验证码。URL: ${url}`.trim());
+      }
+      if (state === 'add_phone_page') {
+        throw new Error(`步骤 ${visibleStep}：OpenAI 要求手机号页面，已按设置停止，不再继续登录验证码流程。URL: ${url}`.trim());
+      }
+    }
+
+    async function submitStep8PasswordLogin(state, visibleStep) {
+      if (typeof sendToContentScriptResilient !== 'function') {
+        throw new Error(`步骤 ${visibleStep}：认证页通信模块不可用，无法改用密码登录。`);
+      }
+      const password = resolveStep8Password(state);
+      if (!password.trim()) {
+        throw new Error(`步骤 ${visibleStep}：缺少登录密码，无法改用密码登录。`);
+      }
+      const identifier = resolveStep8LoginIdentifier(state);
+      if (!identifier.email && !identifier.phoneNumber) {
+        throw new Error(`步骤 ${visibleStep}：缺少登录账号，无法改用密码登录。`);
+      }
+
+      await addLog(`步骤 ${visibleStep}：当前为密码页，改为填写已保存密码，不再获取登录验证码。`, 'info', {
+        step: visibleStep,
+        stepKey: activeFetchLoginCodeStepKey || 'fetch-login-code',
+      });
+
+      const timeoutMs = await getStep8ReadyTimeoutMs('填写登录密码并确认 OAuth 授权页', state?.oauthUrl || '', visibleStep);
+      const result = await sendToContentScriptResilient(
+        'openai-auth',
+        {
+          type: 'EXECUTE_NODE',
+          nodeId: 'oauth-login',
+          step: 7,
+          source: 'background',
+          payload: {
+            email: identifier.email,
+            phoneNumber: identifier.phoneNumber,
+            accountIdentifier: identifier.accountIdentifier,
+            loginIdentifierType: identifier.loginIdentifierType,
+            password,
+            passwordOnly: true,
+            visibleStep,
+          },
+        },
+        {
+          timeoutMs,
+          responseTimeoutMs: timeoutMs,
+          retryDelayMs: 700,
+          logMessage: `步骤 ${visibleStep}：认证页正在提交密码，等待 OAuth 授权页就绪...`,
+          logStep: visibleStep,
+          logStepKey: activeFetchLoginCodeStepKey || 'fetch-login-code',
+        }
+      );
+
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      if (result?.directOAuthConsentPage || result?.skipLoginVerificationStep || result?.state === 'oauth_consent_page') {
+        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { nodeId: state?.nodeId });
+        return result;
+      }
+      if (result?.state === 'verification_page' || result?.state === 'phone_verification_page' || result?.state === 'add_phone_page') {
+        throwStep8VerificationStopped(result, visibleStep);
+      }
+
+      throw new Error(`步骤 ${visibleStep}：提交密码后未进入 OAuth 授权页，当前状态：${result?.state || 'unknown'}。URL: ${result?.url || ''}`.trim());
+    }
+
+    async function runStep8Attempt(state) {
       const visibleStep = getVisibleStep(state, 8);
       activeFetchLoginCodeStep = visibleStep;
       activeFetchLoginCodeStepKey = 'fetch-login-code';
@@ -793,39 +825,26 @@
         authLoginStep: getAuthLoginStepForState(state, visibleStep),
         allowPhoneVerificationPage: true,
         allowAddEmailPage: true,
+        allowPasswordPage: true,
         timeoutMs: await getStep8ReadyTimeoutMs('确认登录验证码页已就绪', state?.oauthUrl || '', visibleStep),
       });
       if (pageState?.state === 'oauth_consent_page') {
         await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { nodeId: state?.nodeId });
         return;
       }
-      const phoneLoginCodeMode = isPhoneLoginCodeMode(state);
-      if (phoneLoginCodeMode) {
-        if (pageState?.state === 'phone_verification_page') {
-          return executeLoginPhoneCodeStep(state, authTabId, visibleStep);
-        }
-        if (pageState?.state === 'add_email_page') {
+      throwStep8VerificationStopped(pageState, visibleStep);
+      if (pageState?.state === 'add_email_page') {
+        if (isPhoneLoginCodeMode(state)) {
           await completeStep8WhenDeferredToBindEmail(visibleStep, { nodeId: state?.nodeId });
           return;
         }
-        if (pageState?.state === 'verification_page') {
-          throw new Error(`步骤 ${visibleStep}：手机号注册模式只允许处理手机登录验证码，当前进入了普通邮箱登录验证码页，不会回落到邮箱 provider。URL: ${pageState?.url || ''}`.trim());
-        }
-        if (pageState?.state === 'add_phone_page') {
-          throw new Error(`步骤 ${visibleStep}：手机号注册模式不应进入添加手机号页。URL: ${pageState?.url || ''}`.trim());
-        }
-        throw new Error(`步骤 ${visibleStep}：手机号注册模式登录验证码步骤进入了不允许的页面：${pageState?.state || 'unknown'}。URL: ${pageState?.url || ''}`.trim());
+        throw new Error(`步骤 ${visibleStep}：Step 8 只改用密码登录，不处理添加邮箱页。URL: ${pageState?.url || ''}`.trim());
+      }
+      if (pageState?.state !== 'password_page') {
+        throw new Error(`步骤 ${visibleStep}：Step 8 只改用密码登录，当前状态不是密码页：${pageState?.state || 'unknown'}。URL: ${pageState?.url || ''}`.trim());
       }
 
-      if (pageState?.state === 'add_phone_page' || pageState?.state === 'phone_verification_page') {
-        await completeStep8WhenDeferredToPostLoginPhone(visibleStep, pageState, { nodeId: state?.nodeId });
-        return;
-      }
-      if (pageState?.state === 'add_email_page') {
-        throw new Error(`步骤 ${visibleStep}：邮箱注册模式不应进入添加邮箱页。URL: ${pageState?.url || ''}`.trim());
-      }
-
-      return pollEmailVerificationCode(state, pageState, visibleStep, runtime);
+      return submitStep8PasswordLogin(state, visibleStep);
     }
 
     function isStep8RestartStep7Error(error) {
@@ -834,129 +853,12 @@
     }
 
     async function executeStep8(state) {
-      let currentState = state;
-      let mailPollingAttempt = 1;
-      let lastMailPollingError = null;
-      let stickyLastResendAt = Number(state?.loginVerificationRequestedAt) || 0;
-      let retryWithoutStep7Streak = 0;
-      const maxRetryWithoutStep7Streak = 3;
-
-      while (true) {
-        try {
-          const result = await runStep8Attempt(currentState, {
-            stickyLastResendAt,
-            onResendRequestedAt: async (requestedAt) => {
-              const numericRequestedAt = Number(requestedAt) || 0;
-              if (numericRequestedAt > 0) {
-                stickyLastResendAt = Math.max(stickyLastResendAt, numericRequestedAt);
-              }
-            },
-          });
-          if (Number(result?.lastResendAt) > 0) {
-            stickyLastResendAt = Math.max(stickyLastResendAt, Number(result.lastResendAt) || 0);
-          }
-          retryWithoutStep7Streak = 0;
-          return;
-        } catch (err) {
-          const visibleStep = getVisibleStep(currentState, 8);
-          const authLoginStep = getAuthLoginStepForState(currentState, visibleStep);
-          let currentError = err;
-          let retryWithoutStep7 = false;
-
-          const isMailPollingError = isVerificationMailPollingError(err);
-          if (isMailPollingError && !isStep8RestartStep7Error(err)) {
-            const recovery = await recoverStep8PollingFailure(currentState, visibleStep);
-            if (recovery?.outcome === 'completed') {
-              return;
-            }
-            if (recovery?.outcome === 'retry_without_step7') {
-              retryWithoutStep7 = true;
-            }
-            if (recovery?.error) {
-              currentError = recovery.error;
-            }
-          }
-          if (!isVerificationMailPollingError(currentError) && !isStep8RestartStep7Error(currentError)) {
-            throw currentError;
-          }
-
-          lastMailPollingError = currentError;
-          if (mailPollingAttempt >= STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS) {
-            break;
-          }
-
-          mailPollingAttempt += 1;
-          if (retryWithoutStep7) {
-            retryWithoutStep7Streak += 1;
-            if (retryWithoutStep7Streak > maxRetryWithoutStep7Streak) {
-              await addLog(
-                `步骤 ${visibleStep}：邮箱通信异常在当前链路已连续重试 ${retryWithoutStep7Streak} 次，改为回到步骤 ${authLoginStep} 重新发起授权链路，避免空轮询循环。`,
-                'warn'
-              );
-              await rerunStep7ForStep8Recovery({
-                logMessage: `邮箱通信异常持续未恢复，正在回到步骤 ${authLoginStep} 重新发起登录流程...`,
-                logStep: visibleStep,
-                logStepKey: 'fetch-login-code',
-              });
-              currentState = await getState();
-              retryWithoutStep7Streak = 0;
-              continue;
-            }
-            await addLog(
-              `步骤 ${visibleStep}：认证页仍保持在验证码页，将在当前链路直接重试（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}），不回到步骤 ${authLoginStep}（连续同链路重试 ${retryWithoutStep7Streak}/${maxRetryWithoutStep7Streak}）。`,
-              'warn'
-            );
-            const latestState = await getState();
-            const latestStateResendAt = Number(latestState?.loginVerificationRequestedAt) || 0;
-            if (latestStateResendAt > 0) {
-              stickyLastResendAt = Math.max(stickyLastResendAt, latestStateResendAt);
-            }
-            currentState = latestState;
-            if (stickyLastResendAt > 0 && (!latestStateResendAt || latestStateResendAt < stickyLastResendAt)) {
-              currentState = {
-                ...latestState,
-                loginVerificationRequestedAt: stickyLastResendAt,
-              };
-            }
-            const resendIntervalMs = getStep8ResendIntervalMs(currentState);
-            const remainingBeforeRetryMs = stickyLastResendAt > 0 && resendIntervalMs > 0
-              ? Math.max(0, resendIntervalMs - (Date.now() - stickyLastResendAt))
-              : 0;
-            if (remainingBeforeRetryMs > 0 && typeof sleepWithStop === 'function') {
-              await addLog(
-                `步骤 ${visibleStep}：上轮已触发重发验证码，为避免重复重发，先等待 ${Math.ceil(remainingBeforeRetryMs / 1000)} 秒后继续当前链路重试。`,
-                'info'
-              );
-              await sleepWithStop(Math.min(remainingBeforeRetryMs, 3000));
-            }
-            continue;
-          }
-          retryWithoutStep7Streak = 0;
-          await addLog(
-            isStep8RestartStep7Error(currentError)
-              ? `步骤 ${visibleStep}：检测到认证页进入重试/超时报错状态，准备从步骤 ${authLoginStep} 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`
-              : `步骤 ${visibleStep}：检测到邮箱轮询类失败，准备从步骤 ${authLoginStep} 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`,
-            'warn'
-          );
-          await rerunStep7ForStep8Recovery({
-            logMessage: isStep8RestartStep7Error(currentError)
-              ? `认证页进入重试/超时报错状态，正在回到步骤 ${authLoginStep} 重新发起登录流程...`
-              : `正在回到步骤 ${authLoginStep}，重新发起登录验证码流程...`,
-            logStep: visibleStep,
-            logStepKey: 'fetch-login-code',
-          });
-          currentState = await getState();
-        }
+      try {
+        await runStep8Attempt(state);
+      } catch (err) {
+        throwIfStopped(err);
+        throw err;
       }
-
-      const visibleStep = getVisibleStep(currentState, 8);
-      if (lastMailPollingError) {
-        throw new Error(
-          `步骤 ${visibleStep}：登录验证码流程在 ${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS} 轮邮箱轮询恢复后仍未成功。最后一次原因：${lastMailPollingError.message}`
-        );
-      }
-
-      throw new Error(`步骤 ${visibleStep}：登录验证码流程未成功完成。`);
     }
 
     return {

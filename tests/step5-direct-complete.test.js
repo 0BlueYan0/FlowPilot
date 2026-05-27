@@ -62,6 +62,9 @@ function getStep5OutcomeBundle() {
     extractFunction('isStep5SubmitButtonClickable'),
     extractFunction('isStep5ProfileStillVisible'),
     extractFunction('isStep5CompletionChatgptUrl'),
+    extractFunction('isStep5AccountChooserPageUrl'),
+    extractFunction('hasStep5SelectableAccountChoice'),
+    extractFunction('isStep5AccountChooserAvailable'),
     extractFunction('getStep5PostSubmitSuccessState'),
     extractFunction('installStep5NavigationCompletionReporter'),
     extractFunction('waitForStep5SubmitOutcome'),
@@ -1059,6 +1062,9 @@ function isAddPhonePageReady() { return false; }
 function isStep5ProfileStillVisible() { return false; }
 
 ${extractFunction('isStep5CompletionChatgptUrl')}
+${extractFunction('isStep5AccountChooserPageUrl')}
+${extractFunction('hasStep5SelectableAccountChoice')}
+${extractFunction('isStep5AccountChooserAvailable')}
 ${extractFunction('getStep5PostSubmitSuccessState')}
 
 return {
@@ -1071,6 +1077,54 @@ return {
   assert.equal(api.run(), null);
 });
 
+test('step 5 treats account chooser with selectable account as submit success', () => {
+  const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/choose-an-account',
+};
+const accountChoice = {
+  textContent: 'new-user@example.com',
+  hidden: false,
+  disabled: false,
+  getAttribute(name) {
+    return name === 'aria-disabled' ? 'false' : '';
+  },
+};
+const document = {
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"]') {
+      return [accountChoice];
+    }
+    return [];
+  },
+};
+
+function getStep5AuthRetryPageState() { return null; }
+function isStep5ProfileStillVisible() { return false; }
+function getStep5ErrorText() { return ''; }
+function isVisibleElement(el) { return Boolean(el) && !el.hidden; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true'; }
+
+${extractFunction('isStep5CompletionChatgptUrl')}
+${extractFunction('isStep5AccountChooserPageUrl')}
+${extractFunction('hasStep5SelectableAccountChoice')}
+${extractFunction('isStep5AccountChooserAvailable')}
+${extractFunction('getStep5PostSubmitSuccessState')}
+${extractFunction('getStep5SubmitState')}
+
+return {
+  run() {
+    return getStep5SubmitState();
+  },
+};
+`)();
+
+  const result = api.run();
+  assert.equal(result.successState, 'account_chooser_available');
+  assert.equal(result.unknownAuthPage, false);
+  assert.equal(result.url, 'https://auth.openai.com/choose-an-account');
+});
+
 test('step 5 completion requires https chatgpt.com and rejects auth-success-like pages', () => {
   const api = new Function(`
 const location = {
@@ -1081,6 +1135,9 @@ function getStep5AuthRetryPageState() { return null; }
 function isStep5ProfileStillVisible() { return false; }
 
 ${extractFunction('isStep5CompletionChatgptUrl')}
+${extractFunction('isStep5AccountChooserPageUrl')}
+${extractFunction('hasStep5SelectableAccountChoice')}
+${extractFunction('isStep5AccountChooserAvailable')}
 ${extractFunction('getStep5PostSubmitSuccessState')}
 
 return {

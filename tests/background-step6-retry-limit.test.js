@@ -534,7 +534,7 @@ test('step 7 forwards phone login identity payload when account identifier is ph
   ]);
 });
 
-test('step 7 keeps Plus email login even when phone sms runtime exists', async () => {
+test('step 7 uses phone login for Plus phone signup when phone sms runtime exists', async () => {
   const source = fs.readFileSync('flows/openai/background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
@@ -564,7 +564,7 @@ test('step 7 keeps Plus email login even when phone sms runtime exists', async (
       events.payloads.push(message.payload);
       return {
         step6Outcome: 'success',
-        state: 'verification_page',
+        state: 'phone_verification_page',
         loginVerificationRequestedAt: 123456,
       };
     },
@@ -582,10 +582,10 @@ test('step 7 keeps Plus email login even when phone sms runtime exists', async (
     visibleStep: 10,
   });
 
-  assert.equal(events.payloads[0].loginIdentifierType, 'email');
-  assert.equal(events.payloads[0].email, 'plus.user@example.com');
-  assert.equal(events.payloads[0].phoneNumber, '');
-  assert.equal(events.payloads[0].accountIdentifier, 'plus.user@example.com');
+  assert.equal(events.payloads[0].loginIdentifierType, 'phone');
+  assert.equal(events.payloads[0].email, '');
+  assert.equal(events.payloads[0].phoneNumber, '+441111111111');
+  assert.equal(events.payloads[0].accountIdentifier, '+441111111111');
 });
 
 test('step 7 keeps relogin-bound-email as the active node id', async () => {
