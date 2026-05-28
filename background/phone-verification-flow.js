@@ -772,7 +772,7 @@
         ? options.actions
         : (
           shouldUseHeroSmsExpandedPriceLookup(options.state || {})
-            ? ['getPricesExtended', 'getPrices']
+            ? ['getPricesExtended', 'getPrices', 'getPricesForVerification']
             : ['getPrices']
         );
 
@@ -840,6 +840,7 @@
 
     async function resolveHeroSmsPricePlanFromPricePayloads(config, countryConfig, state = {}, payloads = []) {
       const userLimit = normalizeHeroSmsPriceLimit(state.heroSmsMaxPrice);
+      const userMinLimit = normalizeHeroSmsPriceLimit(state.heroSmsMinPrice);
       const inStockCandidates = buildSortedUniquePriceCandidates(
         (Array.isArray(payloads) ? payloads : [])
           .flatMap((payload) => collectHeroSmsPriceCandidates(payload, []))
@@ -861,7 +862,13 @@
       if (userLimit !== null) {
         const bounded = mergedCandidates.filter((price) => price <= userLimit);
         if (bounded.length > 0) {
-          const shouldProbeUserLimit = userLimit > bounded[bounded.length - 1];
+          const boundedInConfiguredRange = userMinLimit === null
+            ? bounded
+            : bounded.filter((price) => price >= userMinLimit);
+          const shouldProbeUserLimit = (
+            boundedInConfiguredRange.length === 1
+            && userLimit > boundedInConfiguredRange[boundedInConfiguredRange.length - 1]
+          );
           const prices = shouldProbeUserLimit
             ? buildSortedUniquePriceCandidates([...bounded, userLimit])
             : bounded;
@@ -3675,7 +3682,7 @@
         ) {
           for (const attempt of countryAttempts) {
             const pricePlan = await resolvePhoneActivationPricePlan(config, attempt.countryConfig, state);
-            const orderedPrices = reorderPriceCandidates(pricePlan?.prices, acquirePriority, preferredPriceTier);
+            const orderedPrices = reorderPriceCandidates(pricePlan?.prices, acquirePriority, null);
             const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
               orderedPrices,
               minPriceLimit,
@@ -3735,7 +3742,7 @@
           const pricePlan = attempt.pricePlan || await resolvePhoneActivationPricePlan(config, countryConfig, state);
           let noNumbersObservedInCountry = false;
 
-          const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
+          const orderedPrices = reorderPriceCandidates(pricePlan.prices, HERO_SMS_ACQUIRE_PRIORITY_PRICE, null);
           const rangeFilteredPrices = filterPriceCandidatesWithinRange(
             orderedPrices,
             minPriceLimit,
@@ -3819,17 +3826,24 @@
           for (const maxPrice of pricesToTry) {
             const priceTierAttempts = retryEachPriceTierBeforeEscalation ? maxAcquireRounds : 1;
             let noNumbersObservedAtPrice = false;
-            const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe)
-              && !(
+            const isSyntheticUserLimitProbe = Boolean(pricePlan.syntheticUserLimitProbe)
+              || (
                 Array.isArray(pricePlan.syntheticUserLimitProbePrices)
                 && pricePlan.syntheticUserLimitProbePrices.some((price) => Number(price) === Number(maxPrice))
               );
+            const fixedPrice = !isSyntheticUserLimitProbe;
+            const priceAttemptLabel = maxPrice === null || maxPrice === undefined
+              ? '自动'
+              : String(maxPrice);
+            const priceLogLabel = isSyntheticUserLimitProbe
+              ? `价格上限 ${priceAttemptLabel}`
+              : `价格档位 ${priceAttemptLabel}`;
             for (let priceAttempt = 1; priceAttempt <= priceTierAttempts; priceAttempt += 1) {
               let noNumbersObservedInAttempt = false;
               for (const requestAction of requestActions) {
                 try {
                   await addLog(
-                    `步骤 9：HeroSMS ${countryConfig.label} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice}。`,
+                    `步骤 9：HeroSMS ${countryConfig.label} 正在尝试${formatHeroSmsActionName(requestAction)}，${priceLogLabel}。`,
                     'info'
                   );
                   const payload = await requestPhoneActivationWithPrice(
@@ -3846,7 +3860,9 @@
                   const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
                   if (activation) {
                     const numericPrice = Number(maxPrice);
-                    rememberActivationAcquiredPrice(activation, numericPrice);
+                    if (!isSyntheticUserLimitProbe) {
+                      rememberActivationAcquiredPrice(activation, numericPrice);
+                    }
                     return {
                       ...activation,
                       countryId: countryConfig.id,
@@ -3889,7 +3905,7 @@
                 && priceAttempt < priceTierAttempts
               ) {
                 await addLog(
-                  `步骤 9：HeroSMS ${countryConfig.label} 价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice} 暂无可用号码（第 ${priceAttempt}/${priceTierAttempts} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试该档位。`,
+                  `步骤 9：HeroSMS ${countryConfig.label} ${priceLogLabel} 暂无可用号码（第 ${priceAttempt}/${priceTierAttempts} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试该${isSyntheticUserLimitProbe ? '上限' : '档位'}。`,
                   'warn'
                 );
                 await sleepWithStop(retryDelayMs);
