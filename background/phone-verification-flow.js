@@ -861,11 +861,16 @@
       if (userLimit !== null) {
         const bounded = mergedCandidates.filter((price) => price <= userLimit);
         if (bounded.length > 0) {
+          const shouldProbeUserLimit = userLimit > bounded[bounded.length - 1];
+          const prices = shouldProbeUserLimit
+            ? buildSortedUniquePriceCandidates([...bounded, userLimit])
+            : bounded;
           const boundedPlan = {
-            prices: bounded,
+            prices,
             userLimit,
             minCatalogPrice,
             syntheticUserLimitProbe: false,
+            syntheticUserLimitProbePrices: shouldProbeUserLimit ? [userLimit] : [],
           };
           await persistHeroSmsPricePlanSnapshot(countryConfig, boundedPlan);
           return boundedPlan;
@@ -875,6 +880,7 @@
           userLimit,
           minCatalogPrice,
           syntheticUserLimitProbe: true,
+          syntheticUserLimitProbePrices: [userLimit],
         };
         await persistHeroSmsPricePlanSnapshot(countryConfig, userLimitedPlan);
         return userLimitedPlan;
@@ -3714,6 +3720,7 @@
 
         const noNumbersByCountry = [];
         const retryableNoNumberCountries = [];
+        let exhaustedPriceTierRetriesInRound = false;
         let lastError = null;
         let lastFailureText = '';
 
@@ -3757,6 +3764,7 @@
                 : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
             )
             : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
+          const retryEachPriceTierBeforeEscalation = pricesToTry.length > 1 && maxAcquireRounds > 1;
           const rawTierText = Array.isArray(pricePlan?.prices) && pricePlan.prices.length
             ? pricePlan.prices
                 .map((value) => (value === null || value === undefined ? '自动' : String(value)))
@@ -3809,60 +3817,89 @@
             continue;
           }
           for (const maxPrice of pricesToTry) {
-            for (const requestAction of requestActions) {
-              try {
-                const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe);
-                await addLog(
-                  `步骤 9：HeroSMS ${countryConfig.label} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice}。`,
-                  'info'
-                );
-                const payload = await requestPhoneActivationWithPrice(
-                  config,
-                  countryConfig,
-                  requestAction,
-                  maxPrice,
-                  {
-                    userLimit: pricePlan.userLimit,
-                    userMinLimit: minPriceLimit,
-                    fixedPrice,
+            const priceTierAttempts = retryEachPriceTierBeforeEscalation ? maxAcquireRounds : 1;
+            let noNumbersObservedAtPrice = false;
+            const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe)
+              && !(
+                Array.isArray(pricePlan.syntheticUserLimitProbePrices)
+                && pricePlan.syntheticUserLimitProbePrices.some((price) => Number(price) === Number(maxPrice))
+              );
+            for (let priceAttempt = 1; priceAttempt <= priceTierAttempts; priceAttempt += 1) {
+              let noNumbersObservedInAttempt = false;
+              for (const requestAction of requestActions) {
+                try {
+                  await addLog(
+                    `步骤 9：HeroSMS ${countryConfig.label} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice}。`,
+                    'info'
+                  );
+                  const payload = await requestPhoneActivationWithPrice(
+                    config,
+                    countryConfig,
+                    requestAction,
+                    maxPrice,
+                    {
+                      userLimit: pricePlan.userLimit,
+                      userMinLimit: minPriceLimit,
+                      fixedPrice,
+                    }
+                  );
+                  const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
+                  if (activation) {
+                    const numericPrice = Number(maxPrice);
+                    rememberActivationAcquiredPrice(activation, numericPrice);
+                    return {
+                      ...activation,
+                      countryId: countryConfig.id,
+                    };
                   }
-                );
-                const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
-                if (activation) {
-                  const numericPrice = Number(maxPrice);
-                  rememberActivationAcquiredPrice(activation, numericPrice);
-                  return {
-                    ...activation,
-                    countryId: countryConfig.id,
-                  };
-                }
-                const payloadText = describeHeroSmsPayload(payload);
-                if (isHeroSmsNoNumbersPayload(payload)) {
-                  noNumbersObservedInCountry = true;
+                  const payloadText = describeHeroSmsPayload(payload);
+                  if (isHeroSmsNoNumbersPayload(payload)) {
+                    noNumbersObservedInCountry = true;
+                    noNumbersObservedInAttempt = true;
+                    noNumbersObservedAtPrice = true;
+                    lastFailureText = payloadText || lastFailureText;
+                    continue;
+                  }
+                  if (isHeroSmsTerminalError(payload)) {
+                    throw createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
+                  }
                   lastFailureText = payloadText || lastFailureText;
-                  continue;
-                }
-                if (isHeroSmsTerminalError(payload)) {
-                  throw createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
-                }
-                lastFailureText = payloadText || lastFailureText;
-                lastError = createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
-              } catch (error) {
-                if (error?.localizedPhoneSmsFailure) {
-                  throw error;
-                }
-                const payloadOrMessage = error?.payload || error?.message;
-                if (isHeroSmsTerminalError(payloadOrMessage)) {
-                  throw createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response');
-                }
-                if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
-                  noNumbersObservedInCountry = true;
+                  lastError = createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
+                } catch (error) {
+                  if (error?.localizedPhoneSmsFailure) {
+                    throw error;
+                  }
+                  const payloadOrMessage = error?.payload || error?.message;
+                  if (isHeroSmsTerminalError(payloadOrMessage)) {
+                    throw createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response');
+                  }
+                  if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
+                    noNumbersObservedInCountry = true;
+                    noNumbersObservedInAttempt = true;
+                    noNumbersObservedAtPrice = true;
+                    lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
+                    continue;
+                  }
                   lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
-                  continue;
+                  lastError = error;
                 }
-                lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
-                lastError = error;
               }
+              if (
+                noNumbersObservedInAttempt
+                && priceAttempt < priceTierAttempts
+              ) {
+                await addLog(
+                  `步骤 9：HeroSMS ${countryConfig.label} 价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice} 暂无可用号码（第 ${priceAttempt}/${priceTierAttempts} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试该档位。`,
+                  'warn'
+                );
+                await sleepWithStop(retryDelayMs);
+              }
+              if (!noNumbersObservedInAttempt) {
+                break;
+              }
+            }
+            if (retryEachPriceTierBeforeEscalation && noNumbersObservedAtPrice) {
+              exhaustedPriceTierRetriesInRound = true;
             }
           }
 
@@ -3896,6 +3933,7 @@
           noNumbersByCountry.length
           && round < maxAcquireRounds
           && retryableNoNumberCountries.length > 0
+          && !exhaustedPriceTierRetriesInRound
         ) {
           await addLog(
             `步骤 9：HeroSMS 暂无可用号码（第 ${round}/${maxAcquireRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。国家：${retryableNoNumberCountries.join(', ')}。`,

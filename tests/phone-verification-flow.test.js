@@ -1605,11 +1605,7 @@ test('phone verification helper retries acquisition rounds when at least one cou
   assert.equal(sleeps.length, 1);
   assert.equal(sleeps[0], 2000);
   assert.equal(
-    logs.filter((entry) => String(entry.message || '').includes('HeroSMS 正在获取手机号')).length >= 2,
-    true
-  );
-  assert.equal(
-    logs.some((entry) => String(entry.message || '').includes('HeroSMS 暂无可用号码（第 1/2 轮）')),
+    logs.some((entry) => String(entry.message || '').includes('价格档位 0.05 暂无可用号码（第 1/2 轮）')),
     true
   );
 });
@@ -1880,8 +1876,238 @@ test('phone verification helper climbs price tiers when NO_NUMBERS is returned a
     'getPrices:',
     'getNumber:0.08',
     'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
     'getNumber:0.12',
   ]);
+});
+
+test('phone verification helper exhausts configured HeroSMS retry rounds before raising price tier', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                starter: { cost: 0.08, count: 100 },
+                premium: { cost: 0.12, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if ((action === 'getNumber' || action === 'getNumberV2') && maxPrice === '0.08') {
+        return {
+          ok: true,
+          text: async () => 'NO_NUMBERS',
+        };
+      }
+      if (action === 'getNumber' && maxPrice === '0.12') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:998877:66953334444',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${maxPrice || 'no-price'}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsActivationRetryRounds: 3,
+  });
+
+  assert.equal(activation.activationId, '998877');
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.12',
+  ]);
+});
+
+test('phone verification helper tries HeroSMS user max after lower catalog tier has no numbers', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            33: {
+              dr: {
+                starter: { cost: 0.05, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if ((action === 'getNumber' || action === 'getNumberV2') && maxPrice === '0.05') {
+        return {
+          ok: true,
+          text: async () => 'NO_NUMBERS',
+        };
+      }
+      if (action === 'getNumber' && maxPrice === '0.07') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:707070:573001112233',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${maxPrice || 'no-price'}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountries: [33],
+    heroSmsMaxPrice: '0.07',
+    heroSmsActivationRetryRounds: 3,
+  });
+
+  assert.equal(activation.activationId, '707070');
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.07',
+  ]);
+});
+
+test('phone verification helper uses real HeroSMS intermediate tiers before probing max price', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPricesExtended') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                low: { cost: 0.05, count: 100 },
+                mid: { cost: 0.08, count: 100 },
+                high: { cost: 0.09, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                low: { cost: 0.05, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if (
+        (action === 'getNumber' || action === 'getNumberV2')
+        && (maxPrice === '0.05' || maxPrice === '0.08' || maxPrice === '0.09')
+      ) {
+        return {
+          ok: true,
+          text: async () => 'NO_NUMBERS',
+        };
+      }
+      if (action === 'getNumber' && maxPrice === '0.1') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:should-not-use-max:66950001010',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${maxPrice || 'no-price'}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsMaxPrice: '0.1',
+    heroSmsActivationRetryRounds: 3,
+    heroSmsUseExpandedPriceLookup: true,
+  });
+
+  assert.equal(activation.activationId, 'should-not-use-max');
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPricesExtended:',
+    'getPrices:',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.05',
+    'getNumberV2:0.05',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.09',
+    'getNumberV2:0.09',
+    'getNumber:0.09',
+    'getNumberV2:0.09',
+    'getNumber:0.09',
+    'getNumberV2:0.09',
+    'getNumber:0.1',
+  ]);
+  const capRequest = requests.find((requestUrl) => (
+    requestUrl.searchParams.get('action') === 'getNumber'
+    && requestUrl.searchParams.get('maxPrice') === '0.1'
+  ));
+  assert.equal(capRequest.searchParams.get('fixedPrice'), null);
 });
 
 test('phone verification helper filters HeroSMS tiers by minimum price and ignores out-of-range preferred tier', async () => {
