@@ -4524,6 +4524,23 @@ async function setSignupPhoneState(phoneNumber) {
   }
 }
 
+async function clearCompletedFlowGeneratedIdentity() {
+  const updates = {
+    email: null,
+    registrationEmailState: { ...DEFAULT_REGISTRATION_EMAIL_STATE },
+    accountIdentifierType: null,
+    accountIdentifier: '',
+    phoneNumber: '',
+    signupPhoneNumber: '',
+    signupPhoneActivation: null,
+    signupPhoneCompletedActivation: null,
+    signupPhoneVerificationRequestedAt: null,
+    signupPhoneVerificationPurpose: '',
+  };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+}
+
 function shouldMarkAccountRunRecordRunning(state = {}) {
   const phase = String(state.autoRunPhase || '').trim().toLowerCase();
   return Boolean(state.autoRunning)
@@ -12347,6 +12364,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   broadcastStopToContentScripts,
   buildFreshAutoRunKeepState,
   cancelPendingCommands,
+  clearCompletedFlowGeneratedIdentity,
   clearStopRequest: () => clearStopRequest(),
   createAutoRunSessionId: () => createAutoRunSessionId(),
   ensureHotmailMailboxReadyForAutoRunRound: (...args) => ensureHotmailMailboxReadyForAutoRunRound(...args),

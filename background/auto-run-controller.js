@@ -13,6 +13,7 @@
       broadcastStopToContentScripts,
       buildFreshAutoRunKeepState,
       cancelPendingCommands,
+      clearCompletedFlowGeneratedIdentity,
       clearStopRequest,
       createAutoRunSessionId,
       ensureHotmailMailboxReadyForAutoRunRound,
@@ -702,6 +703,14 @@
             roundSummary.status = 'success';
             roundSummary.finalFailureReason = '';
             successfulRuns += 1;
+            if (typeof clearCompletedFlowGeneratedIdentity === 'function') {
+              await clearCompletedFlowGeneratedIdentity({
+                targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId,
+              });
+            }
             await setState({
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
             });
